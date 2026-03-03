@@ -1,0 +1,9 @@
+flask
+flask-cors
+yfinance
+deep-translator
+python-dateutil
+lxml
+beautifulsoup4
+requests
+pytz
