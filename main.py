@@ -11,7 +11,7 @@ from flask_cors import CORS
 warnings.filterwarnings('ignore')
 app = Flask(__name__); CORS(app)
 
-# ★ 數據中樞 (移除 drop，專注多頭動能)
+# ★ 數據中樞 (靜默純淨版)
 MASTER_BRAIN = {
     "sniper": [], "stocks": [], "live": [],
     "details": {}, "last_update": "N/A", "scan_count": 0
@@ -26,7 +26,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V207.0 - 靜默純淨版</title>
+    <title>ROSS Sniper V208.0 - 精準同步版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -174,7 +174,7 @@ HTML_TEMPLATE = """
                 const data = await res.json();
                 document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描(台灣時間): ' + data.last_update + ' | 總次數: ' + data.scan_count;
 
-                // 左欄：狙擊手歷史 (加入交易量與時間)
+                // 左欄：狙擊手歷史 (精確匹配更新時間才閃爍，不再重複閃)
                 let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 1fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>跳空%</div></div>';
                 data.sniper.forEach(s => {
                     let rowClass = (s.Time === data.last_update) ? "grid-row flash-row" : "grid-row";
@@ -184,7 +184,7 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('sniper-list').innerHTML = snipH;
 
-                // 中欄：即時報警 (加入交易量)
+                // 中欄：即時報警 
                 if (!isLivePaused) {
                     let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr 1.4fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>換手</div><div>訊號連擊</div></div>';
                     data.live.forEach(l => {
@@ -195,7 +195,7 @@ HTML_TEMPLATE = """
                     document.getElementById('live-list').innerHTML = liveH;
                 }
 
-                // 右欄：強勢榜 (加入交易量)
+                // 右欄：強勢榜 
                 let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>換手</div></div>';
                 data.stocks.forEach(s => {
                     rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
@@ -313,7 +313,7 @@ def parse_vol(v_str):
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動掃描引擎 (狙擊手歷史版，無音效)...")
+    print("🔥 啟動掃描引擎 (狙擊事件精準同步版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -349,11 +349,11 @@ def scanner_engine():
                         
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
-                            
                             raw_vol_str = tds[5].text.strip()
                             vol_raw = parse_vol(raw_vol_str)
                                 
-                            cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0})
+                            # ★ 加入 sniper_logged 標記，確保狙擊手只在首次發現或創新高時觸發
+                            cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0, "sniper_logged": False})
                             is_hod_break = False
                             
                             if p_num > cell["HOD"]: 
@@ -374,31 +374,30 @@ def scanner_engine():
                                 "Time": current_time_tw,
                                 "Code": sym, "Price": f"${p_num:.2f}",
                                 "Change": chg_str, "ChangeAmt": change_amt_str,
-                                "Volume": raw_vol_str, # ★ 新增交易量字串
+                                "Volume": raw_vol_str, 
                                 "HOD": f"${cell['HOD']:.2f}",
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "FloatStr": float_str,
                                 "Turnover": turnover_str, "Type": "掃描更新"
                             }
                             
-                            # 動能事件判定
                             is_actionable = False
+                            is_sniper_cond = (gap_p > 3.0 and rvol > 5.0)
                             
-                            # 1. 狙擊手條件
-                            if gap_p > 3.0 and rvol > 5.0: 
-                                item["Type"] = "🚀 爆發"
-                                current_snip_scan.append(item)
+                            # ★ 1. 狙擊手與即時報警的【100% 同步邏輯】
+                            # 只在第一次發現，或是打破今日新高時，才將其同時推入兩個清單
+                            if is_sniper_cond and (not cell["sniper_logged"] or is_hod_break): 
+                                item["Type"] = f"🚀 爆發 ({cell['streak']}連擊)" if cell['streak'] > 0 else "🚀 爆發"
+                                current_snip_scan.append(item)  # 推入狙擊手
+                                current_scan.append(item)       # 推入即時報警 (完全相同的物件與時間)
+                                cell["sniper_logged"] = True
                                 is_actionable = True
                             
-                            # 2. 即時報警 (連擊條件)
+                            # ★ 2. 如果未達狙擊手標準，但帶量過高點，則只推入即時報警
                             elif is_hod_break and rvol > 1.2:
                                 item["Type"] = f"🔥 新高 ({cell['streak']}連擊)"
+                                current_scan.append(item)
                                 is_actionable = True
                             
-                            # 將有動作的股票推入報警
-                            if is_actionable:
-                                current_scan.append(item)
-                            
-                            # 全部符合價格的股票進入排行
                             temp_stocks.append(item)
                             
                             if not cell["NewsList"]: 
@@ -413,7 +412,6 @@ def scanner_engine():
 
                     count += 1
                     
-                    # ★ 雙重歷史滾動 (維持 1000 筆上限)
                     new_sniper = (current_snip_scan + MASTER_BRAIN["sniper"])[:1000]
                     new_live = (current_scan + MASTER_BRAIN["live"])[:1000]
                     
