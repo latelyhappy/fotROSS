@@ -11,22 +11,22 @@ from flask_cors import CORS
 warnings.filterwarnings('ignore')
 app = Flask(__name__); CORS(app)
 
-# ★ 數據中樞
+# ★ 數據中樞 (移除 drop，專注多頭動能)
 MASTER_BRAIN = {
-    "sniper": [], "drop": [], "stocks": [], "live": [],
+    "sniper": [], "stocks": [], "live": [],
     "details": {}, "last_update": "N/A", "scan_count": 0
 }
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面 ] ---
+# --- [ 1. 終極 UI 介面：三欄純淨排版 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V206.0 - 數據精準版</title>
+    <title>ROSS Sniper V207.0 - 靜默純淨版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -51,7 +51,6 @@ HTML_TEMPLATE = """
         
         @keyframes flash { 0% { background-color: rgba(63, 185, 80, 0.5); } 100% { background-color: transparent; } }
         .flash-row { animation: flash 1.5s ease-out; border-left: 3px solid #3fb950; }
-        .drop-row { border-left: 3px solid #ff3366; background: rgba(255, 51, 102, 0.1); }
 
         .news-header { margin-top:10px; border-bottom:1px solid #30363d; padding-bottom:5px; font-size: 14px; color: #fff; }
         .news-item-container { border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 12px; line-height: 1.4; }
@@ -70,8 +69,7 @@ HTML_TEMPLATE = """
         <button onclick="resetZoom()">🔄 重置排版</button>
     </div>
 
-    <div class="window" id="win-sniper" style="top:10px; left:10px; width:540px; height:360px;"><div class="title-bar">🚀 狙擊手 (Gap>3%, RVOL>5x)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-drop" style="top:380px; left:10px; width:540px; height:360px;"><div class="title-bar">📉 下跌警報 (Drop > 2%)</div><div class="content" id="drop-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-sniper" style="top:10px; left:10px; width:540px; height:730px;"><div class="title-bar">🚀 狙擊手 (1000筆歷史滾動)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
     
     <div class="window" id="win-live" style="top:10px; left:560px; width:640px; height:360px;">
         <div class="title-bar">📡 即時報警 (純動能訊號) <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div>
@@ -163,34 +161,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        function playDing() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain); gain.connect(ctx.destination);
-                osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime);
-                gain.gain.setValueAtTime(0.1, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.5);
-            } catch(e) {}
-        }
-        function playDrop() {
-            try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.connect(gain); gain.connect(ctx.destination);
-                osc.type = 'triangle'; osc.frequency.setValueAtTime(150, ctx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.3);
-                gain.gain.setValueAtTime(0.2, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
-            } catch(e) {}
-        }
-
-        let prevSniperCount = 0;
-        let prevScanCount = 0;
         function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
 
         function formatFloat(floatStr) {
@@ -204,49 +174,32 @@ HTML_TEMPLATE = """
                 const data = await res.json();
                 document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描(台灣時間): ' + data.last_update + ' | 總次數: ' + data.scan_count;
 
-                if(data.scan_count > prevScanCount && prevScanCount > 0) {
-                    let newItems = data.live.filter(l => l.Time === data.last_update);
-                    let hasSniper = newItems.some(l => l.Type.includes('爆發'));
-                    let hasDrop = newItems.some(l => l.Type.includes('回落'));
-                    if (hasSniper) playDing();
-                    else if (hasDrop) playDrop();
-                }
-                prevScanCount = data.scan_count;
-
-                let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div><div>跳空%</div></div>';
-                let currentSniperCount = data.sniper.length;
-                let isNewSniper = currentSniperCount > prevSniperCount;
+                // 左欄：狙擊手歷史 (加入交易量與時間)
+                let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 1fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>跳空%</div></div>';
                 data.sniper.forEach(s => {
-                    let rowClass = isNewSniper ? "grid-row flash-row" : "grid-row";
-                    snipH += `<div class="${rowClass}" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
-                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="text-green">${s.ChangeAmt}</div><div class="${formatFloat(s.FloatStr)}">${s.FloatStr}</div><div class="text-gold">${s.RVOL}</div><div>${s.Turnover}</div><div class="text-green">${s.Gap}</div>
+                    let rowClass = (s.Time === data.last_update) ? "grid-row flash-row" : "grid-row";
+                    snipH += `<div class="${rowClass}" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 1fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
+                        <div>${s.Time}</div><div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="text-green">${s.ChangeAmt}</div><div>${s.Volume}</div><div class="${formatFloat(s.FloatStr)}">${s.FloatStr}</div><div class="text-gold">${s.RVOL}</div><div class="text-green">${s.Gap}</div>
                     </div>`;
                 });
                 document.getElementById('sniper-list').innerHTML = snipH;
-                prevSniperCount = currentSniperCount;
 
+                // 中欄：即時報警 (加入交易量)
                 if (!isLivePaused) {
-                    let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1.4fr;"><div>TW時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div><div>訊號連擊</div></div>';
+                    let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr 1.4fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>換手</div><div>訊號連擊</div></div>';
                     data.live.forEach(l => {
-                        liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1.4fr;" onclick="loadDetail('${l.Code}')" ondblclick="openTW('${l.Code}')">
-                            <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div class="${l.Change.includes('-') ? 'text-red' : 'text-green'}">${l.Change}</div><div>${l.ChangeAmt}</div><div class="${formatFloat(l.FloatStr)}">${l.FloatStr}</div><div>${l.RVOL}</div><div>${l.Turnover}</div><div style="color:#ff7b72; font-weight:bold;">${l.Type}</div>
+                        liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr 1.4fr;" onclick="loadDetail('${l.Code}')" ondblclick="openTW('${l.Code}')">
+                            <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div class="${l.Change.includes('-') ? 'text-red' : 'text-green'}">${l.Change}</div><div>${l.ChangeAmt}</div><div>${l.Volume}</div><div class="${formatFloat(l.FloatStr)}">${l.FloatStr}</div><div>${l.RVOL}</div><div>${l.Turnover}</div><div style="color:#ff7b72; font-weight:bold;">${l.Type}</div>
                         </div>`;
                     });
                     document.getElementById('live-list').innerHTML = liveH;
                 }
 
-                let dropH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div><div>回落%</div></div>';
-                data.drop.forEach(d => {
-                    dropH += `<div class="grid-row drop-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1fr;" onclick="loadDetail('${d.Code}')" ondblclick="openTW('${d.Code}')">
-                        <div class="text-blue">${d.Code}</div><div>${d.Price}</div><div class="${d.Change.includes('-') ? 'text-red' : 'text-green'}">${d.Change}</div><div>${d.ChangeAmt}</div><div class="${formatFloat(d.FloatStr)}">${d.FloatStr}</div><div>${d.RVOL}</div><div>${d.Turnover}</div><div class="text-red">${d.Drop}</div>
-                    </div>`;
-                });
-                document.getElementById('drop-list').innerHTML = dropH;
-
-                let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div></div>';
+                // 右欄：強勢榜 (加入交易量)
+                let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>交易量</div><div>浮動股</div><div>量比</div><div>換手</div></div>';
                 data.stocks.forEach(s => {
-                    rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
-                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="text-green">${s.ChangeAmt}</div><div class="${formatFloat(s.FloatStr)}">${s.FloatStr}</div><div>${s.RVOL}</div><div>${s.Turnover}</div>
+                    rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1.2fr 1.2fr 0.8fr 0.8fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
+                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="text-green">${s.ChangeAmt}</div><div>${s.Volume}</div><div class="${formatFloat(s.FloatStr)}">${s.FloatStr}</div><div>${s.RVOL}</div><div>${s.Turnover}</div>
                     </div>`;
                 });
                 document.getElementById('rank-list').innerHTML = rankH;
@@ -298,7 +251,6 @@ HTML_TEMPLATE = """
                 </div>${newsHTML}`;
         }
 
-        window.addEventListener('click', () => { window.audioContextReady = true; }, {once:true});
         setInterval(refresh, 2000);
     </script>
 </body>
@@ -348,7 +300,6 @@ def get_static(ticker):
         return f, a, p
     except: return 1000000, 500000, 1.0
 
-# ★ 修正成交量解析器，精準處理小數點 ★
 def parse_vol(v_str):
     v_str = v_str.upper().replace(',', '').strip()
     try:
@@ -362,7 +313,7 @@ def parse_vol(v_str):
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動防死鎖掃描引擎 (數值精準版)...")
+    print("🔥 啟動掃描引擎 (狙擊手歷史版，無音效)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -387,7 +338,7 @@ def scanner_engine():
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
                 if table:
-                    temp_stocks, temp_snip, temp_drop, current_scan = [], [], [], []
+                    temp_stocks, current_snip_scan, current_scan = [], [], []
                     for tr in table.find_all('tr')[1:30]:
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
@@ -399,8 +350,8 @@ def scanner_engine():
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
                             
-                            # ★ 使用新的解析函數精準處理成交量 ★
-                            vol_raw = parse_vol(tds[5].text)
+                            raw_vol_str = tds[5].text.strip()
+                            vol_raw = parse_vol(raw_vol_str)
                                 
                             cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0})
                             is_hod_break = False
@@ -412,13 +363,10 @@ def scanner_engine():
                             
                             gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
                             rvol = vol_raw / a if a > 0 else 1.0
-                            drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
                             
                             float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                             change_val = p_num - prev
                             change_amt_str = f"+${change_val:.2f}" if change_val >= 0 else f"-${abs(change_val):.2f}"
-                            
-                            # 計算出的換手率與 RVOL 現在會完全準確
                             turnover_str = f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%"
                             chg_str = tds[3].text.strip()
 
@@ -426,27 +374,31 @@ def scanner_engine():
                                 "Time": current_time_tw,
                                 "Code": sym, "Price": f"${p_num:.2f}",
                                 "Change": chg_str, "ChangeAmt": change_amt_str,
-                                "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}",
+                                "Volume": raw_vol_str, # ★ 新增交易量字串
+                                "HOD": f"${cell['HOD']:.2f}",
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "FloatStr": float_str,
                                 "Turnover": turnover_str, "Type": "掃描更新"
                             }
                             
+                            # 動能事件判定
                             is_actionable = False
+                            
+                            # 1. 狙擊手條件
                             if gap_p > 3.0 and rvol > 5.0: 
                                 item["Type"] = "🚀 爆發"
-                                temp_snip.append(item)
+                                current_snip_scan.append(item)
                                 is_actionable = True
-                            elif drop_p < -2.0: 
-                                item["Type"] = "🔴 回落"
-                                temp_drop.append(item)
-                                is_actionable = True
+                            
+                            # 2. 即時報警 (連擊條件)
                             elif is_hod_break and rvol > 1.2:
                                 item["Type"] = f"🔥 新高 ({cell['streak']}連擊)"
                                 is_actionable = True
                             
+                            # 將有動作的股票推入報警
                             if is_actionable:
                                 current_scan.append(item)
                             
+                            # 全部符合價格的股票進入排行
                             temp_stocks.append(item)
                             
                             if not cell["NewsList"]: 
@@ -460,10 +412,13 @@ def scanner_engine():
                             MASTER_BRAIN["details"][sym] = cell
 
                     count += 1
+                    
+                    # ★ 雙重歷史滾動 (維持 1000 筆上限)
+                    new_sniper = (current_snip_scan + MASTER_BRAIN["sniper"])[:1000]
                     new_live = (current_scan + MASTER_BRAIN["live"])[:1000]
                     
                     MASTER_BRAIN.update({
-                        "stocks": temp_stocks, "sniper": temp_snip, "drop": temp_drop,
+                        "stocks": temp_stocks, "sniper": new_sniper,
                         "live": new_live, "last_update": current_time_tw, "scan_count": count
                     })
             
