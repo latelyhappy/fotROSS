@@ -11,22 +11,23 @@ from flask_cors import CORS
 warnings.filterwarnings('ignore')
 app = Flask(__name__); CORS(app)
 
-# ★ 終極數據大腦：1000筆容量 + 新聞快取
+# ★ 強化版數據中樞
 MASTER_BRAIN = {
     "sniper": [], "drop": [], "stocks": [], "live": [],
-    "details": {}, "last_update": "系統啟動中...", "scan_count": 0
+    "details": {}, "last_update": "N/A", "scan_count": 0
 }
-stock_cache = {} # 存放 Float, AvgVol, PrevClose 避免 yfinance 卡死
+stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面：加入低流通高亮與閃爍動畫 ] ---
+# --- [ 1. UI 介面 (保持與 V200.6 相同) ] ---
+# (為了縮短篇幅，這裡省略 HTML_TEMPLATE 的長字串，請您沿用上一版 V200.6 的 HTML_TEMPLATE)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V200.6 - 終極完全體</title>
+    <title>ROSS Sniper V200.7 - 防死鎖版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -38,13 +39,12 @@ HTML_TEMPLATE = """
         .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; }
         
         .text-green { color: #3fb950; font-weight: bold; } .text-red { color: #f85149; font-weight: bold; } .text-blue { color: #58a6ff; font-weight: bold; }
-        .text-gold { color: #f2cc60; font-weight: bold; } /* 低流通股專用金色 */
+        .text-gold { color: #f2cc60; font-weight: bold; } 
         
         .p-box { background: #161b22; border: 1px solid #30363d; padding: 8px; border-radius: 4px; text-align: center; }
         .p-val { font-size: 18px; font-weight: bold; color: #fff; margin-top: 4px; font-family: 'Consolas'; }
         #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
         
-        /* 新狙擊閃爍動畫 */
         @keyframes flash { 0% { background-color: rgba(63, 185, 80, 0.5); } 100% { background-color: transparent; } }
         .flash-row { animation: flash 1.5s ease-out; border-left: 3px solid #3fb950; }
         .drop-row { border-left: 3px solid #ff3366; background: rgba(255, 51, 102, 0.1); }
@@ -68,7 +68,6 @@ HTML_TEMPLATE = """
                 const data = await res.json();
                 document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描: ' + data.last_update + ' | 總次數: ' + data.scan_count;
 
-                // 2. 狙擊手 (加入新目標閃爍)
                 let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;"><div>代碼</div><div>價格</div><div>跳空%</div><div>量比</div></div>';
                 let currentSniperCount = data.sniper.length;
                 let isNewSniper = currentSniperCount > prevSniperCount;
@@ -82,7 +81,6 @@ HTML_TEMPLATE = """
                 document.getElementById('sniper-list').innerHTML = snipH;
                 prevSniperCount = currentSniperCount;
 
-                // 4. 即時報警 (1000筆歷史)
                 let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1.2fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲跌%</div><div>觸發</div></div>';
                 data.live.forEach(l => {
                     liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1.2fr;" onclick="loadDetail('${l.Code}')">
@@ -91,7 +89,6 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('live-list').innerHTML = liveH;
 
-                // 5. 下跌警報
                 let dropH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;"><div>代碼</div><div>價格</div><div>最高(HP)</div><div>回落%</div></div>';
                 data.drop.forEach(d => {
                     dropH += `<div class="grid-row drop-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;" onclick="loadDetail('${d.Code}')">
@@ -100,7 +97,6 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('drop-list').innerHTML = dropH;
 
-                // 3. 強勢榜 (加入 Float < 20M 高亮)
                 let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1.2fr 1fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>浮動股(Float)</div><div>量比</div></div>';
                 data.stocks.forEach(s => {
                     let floatVal = parseFloat(s.FloatStr.replace('M','').replace('K',''));
@@ -139,7 +135,6 @@ HTML_TEMPLATE = """
                 </div>${newsHTML}`;
         }
 
-        // 視窗拖拽縮放維持原樣
         document.querySelectorAll('.window').forEach(win => {
             const title = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
@@ -166,11 +161,12 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 數據獲取模組 (非同步防卡死) ] ---
-def fetch_news_bg(ticker, cell): #
+# --- [ 2. 數據獲取模組 ] ---
+def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:1d&hl=en-US&gl=US&ceid=US:en"
-        r = requests.get(url, timeout=5)
+        # 加入極短 timeout 防卡死
+        r = requests.get(url, timeout=3)
         root = ET.fromstring(r.content)
         news = []
         for item in root.findall('./channel/item')[:3]:
@@ -181,9 +177,10 @@ def fetch_news_bg(ticker, cell): #
                 'time': parser.parse(item.find('pubDate').text).strftime('%Y/%m/%d %H:%M')
             })
         cell["NewsList"] = news
-    except: pass
+    except Exception as e:
+        print(f"新聞抓取錯誤 ({ticker}): {e}")
 
-def get_static(ticker): #
+def get_static(ticker):
     if ticker in stock_cache: return stock_cache[ticker]
     try:
         t = yf.Ticker(ticker); i = t.info
@@ -191,35 +188,55 @@ def get_static(ticker): #
         a = i.get('averageVolume', 500000); p = i.get('previousClose', 1.0)
         stock_cache[ticker] = (f, a, p)
         return f, a, p
-    except: return 1000000, 500000, 1.0
+    except Exception as e:
+        print(f"yfinance 抓取錯誤 ({ticker}): {e}")
+        return 1000000, 500000, 1.0
 
-# --- [ 3. 中央引擎：時區判定與 1000筆 滾動 ] ---
+# --- [ 3. 中央引擎：強化看門狗日誌 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
+    print("🔥 啟動防死鎖掃描引擎...")
+    
     while True:
         try:
             current_time = datetime.now().strftime('%H:%M:%S')
+            print(f"--- [SCAN START] {current_time} 開始第 {count + 1} 次掃描 ---")
             
-            # 自動盤前/盤後網址切換 (美東時間 04:00~16:00 盤前/盤中，其餘盤後)
             tz = pytz.timezone('US/Eastern'); now_us = datetime.now(tz)
             url = "https://stockanalysis.com/markets/premarket/gainers/" if 4 <= now_us.hour < 16 else "https://stockanalysis.com/markets/after-hours/gainers/"
             
+            print(f"   -> 正在請求: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+            
             if r.status_code == 200:
+                print("   -> 請求成功，開始解析...")
                 soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
+                
                 if table:
                     temp_stocks, temp_snip, temp_drop, current_scan = [], [], [], []
+                    rows = table.find_all('tr')[1:25]
+                    print(f"   -> 找到 {len(rows)} 筆資料，準備過濾 1-30 USD...")
                     
-                    for tr in table.find_all('tr')[1:30]:
+                    for tr in rows:
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
+                        
                         sym = tds[1].text.strip()
-                        p_num = float(tds[4].text.replace('$','').replace(',',''))
+                        # 增加防呆：確保字串能轉換為浮點數
+                        try:
+                            p_num = float(tds[4].text.replace('$','').replace(',',''))
+                        except ValueError:
+                            continue
                         
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
-                            vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
+                            
+                            try:
+                                vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
+                            except ValueError:
+                                vol_raw = 0
+                                
                             cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": []})
                             
                             if p_num > cell["HOD"]: cell["HOD"] = p_num
@@ -236,7 +253,6 @@ def scanner_engine():
                                 "Turnover": f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%", "Type": "掃描更新"
                             }
                             
-                            # Ross 核心邏輯判定
                             if gap_p > 3.0 and rvol > 5.0: 
                                 item["Type"] = "🚀 爆發"; temp_snip.append(item)
                             if drop_p < -2.0: 
@@ -245,8 +261,10 @@ def scanner_engine():
                             current_scan.append(item)
                             temp_stocks.append(item)
                             
-                            # 背景獲取新聞 (不卡死主執行緒)
-                            if not cell["NewsList"]: threading.Thread(target=fetch_news_bg, args=(sym, cell)).start()
+                            # 背景獲取新聞 (使用短 timeout 防止線程卡死)
+                            if not cell["NewsList"]: 
+                                threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
+                                
                             MASTER_BRAIN["details"][sym] = {**cell, "Gap": item["Gap"], "Turnover": item["Turnover"], "RVOL": item["RVOL"], "FloatStr": float_str}
 
                     count += 1
@@ -257,9 +275,23 @@ def scanner_engine():
                         "stocks": temp_stocks, "sniper": temp_snip, "drop": temp_drop,
                         "live": new_live, "last_update": current_time, "scan_count": count
                     })
+                    print(f"✅ [SCAN END] 第 {count} 次掃描完成。")
+                else:
+                    print("❌ [ERROR] 找不到表格 <table>！網頁結構可能改變。")
+            else:
+                print(f"❌ [ERROR] 網站阻擋請求，狀態碼: {r.status_code}")
             
-            time.sleep(random.uniform(5.0, 10.0)) # 縮短至 5-10 秒提高即時性
-        except: time.sleep(5)
+            # 隨機冷卻，避免被封鎖
+            wait_time = random.uniform(5.0, 10.0)
+            print(f"⏳ 休息 {wait_time:.1f} 秒...")
+            time.sleep(wait_time)
+            
+        except requests.exceptions.Timeout:
+            print("❌ [TIMEOUT] 請求 StockAnalysis 網頁超時！")
+            time.sleep(10)
+        except Exception as e:
+            print(f"🔥 [CRITICAL] 掃描迴圈崩潰: {e}")
+            time.sleep(10) # 崩潰後休息久一點再重試
 
 @app.route('/data')
 def get_data(): return jsonify(MASTER_BRAIN)
