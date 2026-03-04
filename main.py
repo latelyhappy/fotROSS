@@ -20,22 +20,23 @@ stock_cache = {}
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面 ] ---
+# --- [ 1. 終極 UI 介面：三欄式專業排版 + TW雙擊跳轉 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V200.8 - 不死鳥智能路由版</title>
+    <title>ROSS Sniper V201.0 - 職業當沖版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         .title-bar { background: #1E3A8A; color: white; padding: 6px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; }
         .content { flex: 1; padding: 8px; overflow-y: auto; font-size: 11px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
-        .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 5px 0; cursor: pointer; transition: background 0.2s; }
+        
+        .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 6px 0; cursor: pointer; transition: background 0.1s; }
         .grid-row:hover { background: #161b22; }
-        .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; }
+        .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; padding-bottom: 8px; }
         
         .text-green { color: #3fb950; font-weight: bold; } .text-red { color: #f85149; font-weight: bold; } .text-blue { color: #58a6ff; font-weight: bold; }
         .text-gold { color: #f2cc60; font-weight: bold; } 
@@ -50,16 +51,23 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <div class="window" style="top:10px; left:10px; width:480px; height:320px;"><div class="title-bar">🚀 狙擊手 (Gap>3%, RVOL>5x)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
-    <div class="window" style="top:10px; left:500px; width:540px; height:600px;"><div class="title-bar">📡 即時報警 (1000筆歷史滾動)</div><div class="content" id="live-list"></div><div class="resize-handle"></div></div>
-    <div class="window" style="top:340px; left:10px; width:480px; height:320px;"><div class="title-bar">📉 下跌警報 (Drop > 2%)</div><div class="content" id="drop-list"></div><div class="resize-handle"></div></div>
-    <div class="window" style="top:620px; left:500px; width:540px; height:360px;"><div class="title-bar">🏆 強勢榜 (1-30 USD)</div><div class="content" id="rank-list"></div><div class="resize-handle"></div></div>
-    <div class="window" style="top:670px; left:10px; width:480px; height:310px;"><div class="title-bar">📊 戰情與新聞 (點擊代碼)</div><div class="content" id="detail-list"><div style="color:#8b949e; padding:10px;">請點擊任何股票代碼以載入戰情分析...</div></div><div class="resize-handle"></div></div>
+    <div class="window" style="top:10px; left:10px; width:520px; height:360px;"><div class="title-bar">🚀 狙擊手 (Gap>3%, RVOL>5x)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
+    <div class="window" style="top:380px; left:10px; width:520px; height:360px;"><div class="title-bar">📉 下跌警報 (Drop > 2%)</div><div class="content" id="drop-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" style="top:10px; left:540px; width:580px; height:360px;"><div class="title-bar">📡 即時報警 (1000筆歷史滾動)</div><div class="content" id="live-list"></div><div class="resize-handle"></div></div>
+    <div class="window" style="top:380px; left:540px; width:580px; height:360px;"><div class="title-bar">📊 戰情與新聞 (單擊載入/雙擊TW圖表)</div><div class="content" id="detail-list"><div style="color:#8b949e; padding:10px;">請點擊任何股票代碼...</div></div><div class="resize-handle"></div></div>
+
+    <div class="window" style="top:10px; left:1130px; width:550px; height:730px;"><div class="title-bar">🏆 強勢榜 (1-30 USD)</div><div class="content" id="rank-list"></div><div class="resize-handle"></div></div>
 
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
     <script>
         let prevSniperCount = 0;
+
+        // ★ 連點兩下跳轉 TradingView 函數
+        function openTW(sym) {
+            window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank');
+        }
 
         async function refresh() {
             try {
@@ -67,43 +75,47 @@ HTML_TEMPLATE = """
                 const data = await res.json();
                 document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描: ' + data.last_update + ' | 總次數: ' + data.scan_count;
 
-                let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;"><div>代碼</div><div>價格</div><div>跳空%</div><div>量比</div></div>';
+                // 2. 狙擊手 (補齊欄位)
+                let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1.2fr;"><div>代碼</div><div>價格</div><div>漲幅$</div><div>跳空%</div><div>量比</div><div>訊號</div></div>';
                 let currentSniperCount = data.sniper.length;
                 let isNewSniper = currentSniperCount > prevSniperCount;
                 
                 data.sniper.forEach(s => {
                     let rowClass = isNewSniper ? "grid-row flash-row" : "grid-row";
-                    snipH += `<div class="${rowClass}" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;" onclick="loadDetail('${s.Code}')">
-                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Gap}</div><div class="text-gold">${s.RVOL}</div>
+                    snipH += `<div class="${rowClass}" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1.2fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
+                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.ChangeAmt}</div><div class="text-green">${s.Gap}</div><div class="text-gold">${s.RVOL}</div><div>${s.Type}</div>
                     </div>`;
                 });
                 document.getElementById('sniper-list').innerHTML = snipH;
                 prevSniperCount = currentSniperCount;
 
-                let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1.2fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲跌%</div><div>觸發</div></div>';
+                // 4. 即時報警 (補齊量比與換手)
+                let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1fr 1.2fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲跌%</div><div>量比</div><div>換手</div><div>觸發</div></div>';
                 data.live.forEach(l => {
-                    liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1.2fr;" onclick="loadDetail('${l.Code}')">
-                        <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div class="${l.Change.includes('-') ? 'text-red' : 'text-green'}">${l.Change}</div><div style="color:#8b949e">${l.Type}</div>
+                    liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1fr 1.2fr;" onclick="loadDetail('${l.Code}')" ondblclick="openTW('${l.Code}')">
+                        <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div class="${l.Change.includes('-') ? 'text-red' : 'text-green'}">${l.Change}</div><div>${l.RVOL}</div><div>${l.Turnover}</div><div style="color:#8b949e">${l.Type}</div>
                     </div>`;
                 });
                 document.getElementById('live-list').innerHTML = liveH;
 
-                let dropH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;"><div>代碼</div><div>價格</div><div>最高(HP)</div><div>回落%</div></div>';
+                // 5. 下跌警報 (補齊換手率)
+                let dropH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1fr;"><div>代碼</div><div>價格</div><div>最高(HP)</div><div>回落%</div><div>換手</div><div>訊號</div></div>';
                 data.drop.forEach(d => {
-                    dropH += `<div class="grid-row drop-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr;" onclick="loadDetail('${d.Code}')">
-                        <div class="text-blue">${d.Code}</div><div>${d.Price}</div><div>${d.HOD}</div><div class="text-red">${d.Drop}</div>
+                    dropH += `<div class="grid-row drop-row" style="grid-template-columns: 0.8fr 1fr 1fr 1fr 1fr 1fr;" onclick="loadDetail('${d.Code}')" ondblclick="openTW('${d.Code}')">
+                        <div class="text-blue">${d.Code}</div><div>${d.Price}</div><div>${d.HOD}</div><div class="text-red">${d.Drop}</div><div>${d.Turnover}</div><div>${d.Type}</div>
                     </div>`;
                 });
                 document.getElementById('drop-list').innerHTML = dropH;
 
-                let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1.2fr 1fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>浮動股(Float)</div><div>量比</div></div>';
+                // 3. 強勢榜 (加入所有籌碼欄位)
+                let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 0.8fr 1.2fr 0.8fr 0.8fr;"><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股(Float)</div><div>量比</div><div>換手</div></div>';
                 data.stocks.forEach(s => {
                     let floatVal = parseFloat(s.FloatStr.replace('M','').replace('K',''));
                     let isLowFloat = s.FloatStr.includes('M') && floatVal < 20.0 || s.FloatStr.includes('K');
                     let floatClass = isLowFloat ? "text-gold" : "";
                     
-                    rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1.2fr 1fr;" onclick="loadDetail('${s.Code}')">
-                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="${floatClass}">${s.FloatStr}</div><div>${s.RVOL}</div>
+                    rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 0.8fr 1.2fr 0.8fr 0.8fr;" onclick="loadDetail('${s.Code}')" ondblclick="openTW('${s.Code}')">
+                        <div class="text-blue">${s.Code}</div><div>${s.Price}</div><div class="text-green">${s.Change}</div><div class="text-green">${s.ChangeAmt}</div><div class="${floatClass}">${s.FloatStr}</div><div>${s.RVOL}</div><div>${s.Turnover}</div>
                     </div>`;
                 });
                 document.getElementById('rank-list').innerHTML = rankH;
@@ -126,11 +138,13 @@ HTML_TEMPLATE = """
             }
 
             document.getElementById('detail-list').innerHTML = `
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:6px;">
                     <div class="p-box">今日最高 (HP)<div class="p-val">${d.HOD}</div></div>
                     <div class="p-box">換手率 (%)<div class="p-val" style="color:#f2cc60;">${d.Turnover || 'N/A'}</div></div>
                     <div class="p-box">浮動股數<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div>
+                    <div class="p-box">跳空幅 (%)<div class="p-val" style="color:#3fb950;">${d.Gap || '0%'}</div></div>
                     <div class="p-box">量比 (RVOL)<div class="p-val">${d.RVOL}</div></div>
+                    <div class="p-box">漲跌金額<div class="p-val">${d.ChangeAmt}</div></div>
                 </div>${newsHTML}`;
         }
 
@@ -196,9 +210,8 @@ def scanner_engine():
     while True:
         try:
             current_time = datetime.now().strftime('%H:%M:%S')
-            print(f"--- [SCAN START] {current_time} 開始第 {count + 1} 次掃描 ---")
             
-            # ★ 1. 智能判斷美股開盤時段
+            # 自動網址切換 
             tz = pytz.timezone('US/Eastern')
             now_us = datetime.now(tz)
             
@@ -207,63 +220,59 @@ def scanner_engine():
             elif 9 <= now_us.hour < 16:
                 url = "https://stockanalysis.com/markets/gainers/"
             else:
-                url = "https://stockanalysis.com/markets/after-hours/" # 嘗試盤後網址
+                url = "https://stockanalysis.com/markets/after-hours/"
 
-            print(f"   -> 正在請求: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
             
-            # ★ 2. 404 故障轉移機制 (Fail-safe Fallback)
+            # 404 故障轉移 (Fail-safe Fallback)
             if r.status_code == 404:
-                print(f"   -> ❌ 網址失效 ({url})，啟動備用路由！")
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
-                print(f"   -> 正在請求備用: {url}")
                 r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
             
-            # 確保狀態碼為 200 才進行解析
             if r.status_code == 200:
-                print("   -> 請求成功，開始解析...")
                 soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
-                
                 if table:
                     temp_stocks, temp_snip, temp_drop, current_scan = [], [], [], []
-                    
                     for tr in table.find_all('tr')[1:30]:
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
                         
                         sym = tds[1].text.strip()
-                        try:
-                            p_num = float(tds[4].text.replace('$','').replace(',',''))
-                        except ValueError:
-                            continue
+                        try: p_num = float(tds[4].text.replace('$','').replace(',',''))
+                        except: continue
                         
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
-                            try:
-                                vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
-                            except ValueError:
-                                vol_raw = 0
+                            try: vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
+                            except: vol_raw = 0
                                 
                             cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": []})
-                            
                             if p_num > cell["HOD"]: cell["HOD"] = p_num
+                            
                             gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
                             rvol = vol_raw / a if a > 0 else 1.0
                             drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
+                            
+                            # 格式化數值
                             float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                            change_val = p_num - prev
+                            change_amt_str = f"+${change_val:.2f}" if change_val >= 0 else f"-${abs(change_val):.2f}"
+                            turnover_str = f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%"
 
                             item = {
                                 "Time": current_time, "Code": sym, "Price": f"${p_num:.2f}",
-                                "Change": tds[3].text.strip(), "ChangeAmt": f"${(p_num-prev):.2f}",
+                                "Change": tds[3].text.strip(), "ChangeAmt": change_amt_str,
                                 "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}",
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "FloatStr": float_str,
-                                "Turnover": f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%", "Type": "掃描更新"
+                                "Turnover": turnover_str, "Type": "掃描更新"
                             }
                             
                             if gap_p > 3.0 and rvol > 5.0: 
                                 item["Type"] = "🚀 爆發"; temp_snip.append(item)
                             if drop_p < -2.0: 
                                 item["Type"] = "🔴 回落"; temp_drop.append(item)
+                            if p_num >= cell["HOD"] and rvol > 1.2:
+                                item["Type"] = "🔥 新高"
                             
                             current_scan.append(item)
                             temp_stocks.append(item)
@@ -271,33 +280,22 @@ def scanner_engine():
                             if not cell["NewsList"]: 
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
-                            MASTER_BRAIN["details"][sym] = {**cell, "Gap": item["Gap"], "Turnover": item["Turnover"], "RVOL": item["RVOL"], "FloatStr": float_str}
+                            MASTER_BRAIN["details"][sym] = {
+                                **cell, "Gap": item["Gap"], "Turnover": item["Turnover"], 
+                                "RVOL": item["RVOL"], "FloatStr": float_str, "ChangeAmt": change_amt_str
+                            }
 
                     count += 1
-                    # ★ 歷史滾動：將新抓到的資料推到前面
                     new_live = (current_scan + MASTER_BRAIN["live"])[:1000]
                     
                     MASTER_BRAIN.update({
                         "stocks": temp_stocks, "sniper": temp_snip, "drop": temp_drop,
                         "live": new_live, "last_update": current_time, "scan_count": count
                     })
-                    print(f"✅ [SCAN END] 第 {count} 次掃描完成。")
-                else:
-                    print("❌ [ERROR] 找不到表格 <table>！")
-            else:
-                print(f"❌ [ERROR] 網站阻擋請求，狀態碼: {r.status_code}")
+                    print(f"✅ 第 {count} 次掃描完成。")
             
-            # 休息避免被封鎖
-            wait_time = random.uniform(5.0, 10.0)
-            print(f"⏳ 休息 {wait_time:.1f} 秒...")
-            time.sleep(wait_time)
-            
-        except requests.exceptions.Timeout:
-            print("❌ [TIMEOUT] 請求超時！")
-            time.sleep(10)
-        except Exception as e:
-            print(f"🔥 [CRITICAL] 崩潰: {e}")
-            time.sleep(10)
+            time.sleep(random.uniform(5.0, 10.0))
+        except: time.sleep(10)
 
 @app.route('/data')
 def get_data(): return jsonify(MASTER_BRAIN)
