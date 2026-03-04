@@ -26,7 +26,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V205.0 - 台灣時間版</title>
+    <title>ROSS Sniper V206.0 - 數據精準版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -84,7 +84,6 @@ HTML_TEMPLATE = """
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
     <script>
-        // --- 視窗排版與縮放 ---
         let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0;
         document.body.style.zoom = currentZoom; 
 
@@ -150,7 +149,6 @@ HTML_TEMPLATE = """
             };
         });
 
-        // --- 暫停滾動控制 ---
         let isLivePaused = false;
         function togglePause(e) {
             e.stopPropagation();
@@ -165,7 +163,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        // --- 合成器音效系統 ---
         function playDing() {
             try {
                 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -192,7 +189,6 @@ HTML_TEMPLATE = """
             } catch(e) {}
         }
 
-        // --- 數據刷新系統 ---
         let prevSniperCount = 0;
         let prevScanCount = 0;
         function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
@@ -309,14 +305,13 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 (台灣時間轉換) ] ---
+# --- [ 2. 新聞與靜態數據模組 ] ---
 def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
         r = requests.get(url, headers=STEALTH_HEADERS, timeout=5)
         root = ET.fromstring(r.content)
         
-        # ★ 轉換為台灣時區 (Asia/Taipei)
         tz_tw = pytz.timezone('Asia/Taipei')
         now_tw = datetime.now(tz_tw)
         
@@ -325,11 +320,9 @@ def fetch_news_bg(ticker, cell):
             title_text = item.find('title').text
             title_en = title_text.rsplit(" - ", 1)[0] if " - " in title_text else title_text
             
-            # 解析新聞的 UTC 時間，並強制轉換為台灣時間
             pub_dt_utc = parser.parse(item.find('pubDate').text)
             pub_dt_tw = pub_dt_utc.astimezone(tz_tw)
             
-            # 以台灣時間來判斷「今日」或「昨日」
             if pub_dt_tw.date() == now_tw.date(): cat = "today"
             elif pub_dt_tw.date() == (now_tw.date() - timedelta(days=1)): cat = "yesterday"
             else: cat = "older"
@@ -337,7 +330,7 @@ def fetch_news_bg(ticker, cell):
             news.append({
                 'title': translator.translate(title_en),
                 'link': item.find('link').text,
-                'time': pub_dt_tw.strftime('%m/%d %H:%M'), # 顯示台灣時間
+                'time': pub_dt_tw.strftime('%m/%d %H:%M'),
                 'category': cat
             })
             
@@ -355,22 +348,28 @@ def get_static(ticker):
         return f, a, p
     except: return 1000000, 500000, 1.0
 
-# --- [ 3. 智能路由中央引擎 (台灣時間版) ] ---
+# ★ 修正成交量解析器，精準處理小數點 ★
+def parse_vol(v_str):
+    v_str = v_str.upper().replace(',', '').strip()
+    try:
+        if 'M' in v_str: return float(v_str.replace('M', '')) * 1e6
+        if 'K' in v_str: return float(v_str.replace('K', '')) * 1e3
+        if 'B' in v_str: return float(v_str.replace('B', '')) * 1e9
+        return float(v_str)
+    except: return 0.0
+
+# --- [ 3. 智能路由中央引擎 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動防死鎖掃描引擎 (台灣時區版)...")
+    print("🔥 啟動防死鎖掃描引擎 (數值精準版)...")
     
-    # 設定台灣時區
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
     while True:
         try:
-            # 抓取並顯示台灣時間
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
-            
-            # 判斷路由時，依舊使用美東時間，因為開關盤是以美國為準
             now_us = datetime.now(tz_us)
             
             if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30):
@@ -399,8 +398,9 @@ def scanner_engine():
                         
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
-                            try: vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
-                            except: vol_raw = 0
+                            
+                            # ★ 使用新的解析函數精準處理成交量 ★
+                            vol_raw = parse_vol(tds[5].text)
                                 
                             cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0})
                             is_hod_break = False
@@ -417,11 +417,13 @@ def scanner_engine():
                             float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                             change_val = p_num - prev
                             change_amt_str = f"+${change_val:.2f}" if change_val >= 0 else f"-${abs(change_val):.2f}"
+                            
+                            # 計算出的換手率與 RVOL 現在會完全準確
                             turnover_str = f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%"
                             chg_str = tds[3].text.strip()
 
                             item = {
-                                "Time": current_time_tw, # 使用台灣時間
+                                "Time": current_time_tw,
                                 "Code": sym, "Price": f"${p_num:.2f}",
                                 "Change": chg_str, "ChangeAmt": change_amt_str,
                                 "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}",
