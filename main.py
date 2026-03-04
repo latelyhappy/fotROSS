@@ -26,7 +26,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V204.0 - 純淨動能版</title>
+    <title>ROSS Sniper V205.0 - 台灣時間版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -53,7 +53,6 @@ HTML_TEMPLATE = """
         .flash-row { animation: flash 1.5s ease-out; border-left: 3px solid #3fb950; }
         .drop-row { border-left: 3px solid #ff3366; background: rgba(255, 51, 102, 0.1); }
 
-        /* ★ 新聞字體適度縮小 (舒適閱讀版) */
         .news-header { margin-top:10px; border-bottom:1px solid #30363d; padding-bottom:5px; font-size: 14px; color: #fff; }
         .news-item-container { border-left: 3px solid #8b949e; padding-left: 10px; margin-bottom: 12px; line-height: 1.4; }
         .news-date-tag { font-size: 12px; font-weight: bold; margin-bottom: 4px; display: inline-block; }
@@ -207,9 +206,8 @@ HTML_TEMPLATE = """
             try {
                 const res = await fetch('/data?t=' + Date.now());
                 const data = await res.json();
-                document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描: ' + data.last_update + ' | 總次數: ' + data.scan_count;
+                document.getElementById('sys-status').innerText = '✅ 狀態: 正常 | 最後掃描(台灣時間): ' + data.last_update + ' | 總次數: ' + data.scan_count;
 
-                // ★ 音效觸發邏輯 ★
                 if(data.scan_count > prevScanCount && prevScanCount > 0) {
                     let newItems = data.live.filter(l => l.Time === data.last_update);
                     let hasSniper = newItems.some(l => l.Type.includes('爆發'));
@@ -231,9 +229,8 @@ HTML_TEMPLATE = """
                 document.getElementById('sniper-list').innerHTML = snipH;
                 prevSniperCount = currentSniperCount;
 
-                // 即時報警 (受暫停鍵控制)
                 if (!isLivePaused) {
-                    let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1.4fr;"><div>時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div><div>訊號連擊</div></div>';
+                    let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1.4fr;"><div>TW時間</div><div>代碼</div><div>價格</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div><div>換手</div><div>訊號連擊</div></div>';
                     data.live.forEach(l => {
                         liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 1fr 1fr 1fr 1.2fr 0.8fr 0.8fr 1.4fr;" onclick="loadDetail('${l.Code}')" ondblclick="openTW('${l.Code}')">
                             <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div class="${l.Change.includes('-') ? 'text-red' : 'text-green'}">${l.Change}</div><div>${l.ChangeAmt}</div><div class="${formatFloat(l.FloatStr)}">${l.FloatStr}</div><div>${l.RVOL}</div><div>${l.Turnover}</div><div style="color:#ff7b72; font-weight:bold;">${l.Type}</div>
@@ -266,7 +263,7 @@ HTML_TEMPLATE = """
             const d = data.details[sym];
             if(!d) return;
 
-            let newsHTML = '<h3 class="news-header">📰 48H 催化劑情報</h3>';
+            let newsHTML = '<h3 class="news-header">📰 48H 催化劑情報 (台灣時間)</h3>';
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
                     if(n.link === '#') {
@@ -305,7 +302,6 @@ HTML_TEMPLATE = """
                 </div>${newsHTML}`;
         }
 
-        // 啟動頁面時提示點擊以授權音效
         window.addEventListener('click', () => { window.audioContextReady = true; }, {once:true});
         setInterval(refresh, 2000);
     </script>
@@ -313,31 +309,35 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 ] ---
+# --- [ 2. 新聞與靜態數據模組 (台灣時間轉換) ] ---
 def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
         r = requests.get(url, headers=STEALTH_HEADERS, timeout=5)
         root = ET.fromstring(r.content)
         
-        tz = pytz.timezone('US/Eastern')
-        now_us = datetime.now(tz)
+        # ★ 轉換為台灣時區 (Asia/Taipei)
+        tz_tw = pytz.timezone('Asia/Taipei')
+        now_tw = datetime.now(tz_tw)
         
         news = []
         for item in root.findall('./channel/item')[:4]: 
             title_text = item.find('title').text
             title_en = title_text.rsplit(" - ", 1)[0] if " - " in title_text else title_text
             
-            pub_dt = parser.parse(item.find('pubDate').text).astimezone(tz)
+            # 解析新聞的 UTC 時間，並強制轉換為台灣時間
+            pub_dt_utc = parser.parse(item.find('pubDate').text)
+            pub_dt_tw = pub_dt_utc.astimezone(tz_tw)
             
-            if pub_dt.date() == now_us.date(): cat = "today"
-            elif pub_dt.date() == (now_us.date() - timedelta(days=1)): cat = "yesterday"
+            # 以台灣時間來判斷「今日」或「昨日」
+            if pub_dt_tw.date() == now_tw.date(): cat = "today"
+            elif pub_dt_tw.date() == (now_tw.date() - timedelta(days=1)): cat = "yesterday"
             else: cat = "older"
                 
             news.append({
                 'title': translator.translate(title_en),
                 'link': item.find('link').text,
-                'time': pub_dt.strftime('%m/%d %H:%M'),
+                'time': pub_dt_tw.strftime('%m/%d %H:%M'), # 顯示台灣時間
                 'category': cat
             })
             
@@ -355,16 +355,23 @@ def get_static(ticker):
         return f, a, p
     except: return 1000000, 500000, 1.0
 
-# --- [ 3. 智能路由中央引擎 (純淨過濾版) ] ---
+# --- [ 3. 智能路由中央引擎 (台灣時間版) ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動防死鎖掃描引擎 (純動能事件版)...")
+    print("🔥 啟動防死鎖掃描引擎 (台灣時區版)...")
+    
+    # 設定台灣時區
+    tz_tw = pytz.timezone('Asia/Taipei')
+    tz_us = pytz.timezone('US/Eastern')
     
     while True:
         try:
-            current_time = datetime.now().strftime('%H:%M:%S')
-            tz = pytz.timezone('US/Eastern'); now_us = datetime.now(tz)
+            # 抓取並顯示台灣時間
+            current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
+            
+            # 判斷路由時，依舊使用美東時間，因為開關盤是以美國為準
+            now_us = datetime.now(tz_us)
             
             if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30):
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
@@ -374,7 +381,6 @@ def scanner_engine():
                 url = "https://stockanalysis.com/markets/after-hours/"
 
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            
             if r.status_code == 404:
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
                 r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
@@ -399,7 +405,6 @@ def scanner_engine():
                             cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0})
                             is_hod_break = False
                             
-                            # 連擊計數器邏輯
                             if p_num > cell["HOD"]: 
                                 cell["HOD"] = p_num
                                 cell["streak"] += 1
@@ -416,14 +421,14 @@ def scanner_engine():
                             chg_str = tds[3].text.strip()
 
                             item = {
-                                "Time": current_time, "Code": sym, "Price": f"${p_num:.2f}",
+                                "Time": current_time_tw, # 使用台灣時間
+                                "Code": sym, "Price": f"${p_num:.2f}",
                                 "Change": chg_str, "ChangeAmt": change_amt_str,
                                 "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}",
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "FloatStr": float_str,
                                 "Turnover": turnover_str, "Type": "掃描更新"
                             }
                             
-                            # ★ 動能事件判定 (剔除雜訊)
                             is_actionable = False
                             if gap_p > 3.0 and rvol > 5.0: 
                                 item["Type"] = "🚀 爆發"
@@ -437,11 +442,9 @@ def scanner_engine():
                                 item["Type"] = f"🔥 新高 ({cell['streak']}連擊)"
                                 is_actionable = True
                             
-                            # 只有真正發生動能事件的股票才推入即時報警區
                             if is_actionable:
                                 current_scan.append(item)
                             
-                            # 全局排行榜依然保留所有符合價格的股票
                             temp_stocks.append(item)
                             
                             if not cell["NewsList"]: 
@@ -455,12 +458,11 @@ def scanner_engine():
                             MASTER_BRAIN["details"][sym] = cell
 
                     count += 1
-                    # 歷史滾動：只有 actionable events 會疊加
                     new_live = (current_scan + MASTER_BRAIN["live"])[:1000]
                     
                     MASTER_BRAIN.update({
                         "stocks": temp_stocks, "sniper": temp_snip, "drop": temp_drop,
-                        "live": new_live, "last_update": current_time, "scan_count": count
+                        "live": new_live, "last_update": current_time_tw, "scan_count": count
                     })
             
             time.sleep(random.uniform(5.0, 10.0))
