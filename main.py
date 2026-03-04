@@ -11,7 +11,7 @@ from flask_cors import CORS
 warnings.filterwarnings('ignore')
 app = Flask(__name__); CORS(app)
 
-# ★ 強化版數據中樞
+# ★ 終極數據大腦
 MASTER_BRAIN = {
     "sniper": [], "drop": [], "stocks": [], "live": [],
     "details": {}, "last_update": "N/A", "scan_count": 0
@@ -20,14 +20,13 @@ stock_cache = {}
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. UI 介面 (保持與 V200.6 相同) ] ---
-# (為了縮短篇幅，這裡省略 HTML_TEMPLATE 的長字串，請您沿用上一版 V200.6 的 HTML_TEMPLATE)
+# --- [ 1. 終極 UI 介面 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V200.7 - 防死鎖版</title>
+    <title>ROSS Sniper V200.8 - 不死鳥智能路由版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -165,7 +164,6 @@ HTML_TEMPLATE = """
 def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:1d&hl=en-US&gl=US&ceid=US:en"
-        # 加入極短 timeout 防卡死
         r = requests.get(url, timeout=3)
         root = ET.fromstring(r.content)
         news = []
@@ -177,8 +175,7 @@ def fetch_news_bg(ticker, cell):
                 'time': parser.parse(item.find('pubDate').text).strftime('%Y/%m/%d %H:%M')
             })
         cell["NewsList"] = news
-    except Exception as e:
-        print(f"新聞抓取錯誤 ({ticker}): {e}")
+    except: pass
 
 def get_static(ticker):
     if ticker in stock_cache: return stock_cache[ticker]
@@ -188,42 +185,53 @@ def get_static(ticker):
         a = i.get('averageVolume', 500000); p = i.get('previousClose', 1.0)
         stock_cache[ticker] = (f, a, p)
         return f, a, p
-    except Exception as e:
-        print(f"yfinance 抓取錯誤 ({ticker}): {e}")
-        return 1000000, 500000, 1.0
+    except: return 1000000, 500000, 1.0
 
-# --- [ 3. 中央引擎：強化看門狗日誌 ] ---
+# --- [ 3. 智能路由中央引擎 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動防死鎖掃描引擎...")
+    print("🔥 啟動防死鎖掃描引擎 (智能網址路由版)...")
     
     while True:
         try:
             current_time = datetime.now().strftime('%H:%M:%S')
             print(f"--- [SCAN START] {current_time} 開始第 {count + 1} 次掃描 ---")
             
-            tz = pytz.timezone('US/Eastern'); now_us = datetime.now(tz)
-            url = "https://stockanalysis.com/markets/premarket/gainers/" if 4 <= now_us.hour < 16 else "https://stockanalysis.com/markets/after-hours/gainers/"
+            # ★ 1. 智能判斷美股開盤時段
+            tz = pytz.timezone('US/Eastern')
+            now_us = datetime.now(tz)
             
+            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30):
+                url = "https://stockanalysis.com/markets/premarket/gainers/"
+            elif 9 <= now_us.hour < 16:
+                url = "https://stockanalysis.com/markets/gainers/"
+            else:
+                url = "https://stockanalysis.com/markets/after-hours/" # 嘗試盤後網址
+
             print(f"   -> 正在請求: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
             
+            # ★ 2. 404 故障轉移機制 (Fail-safe Fallback)
+            if r.status_code == 404:
+                print(f"   -> ❌ 網址失效 ({url})，啟動備用路由！")
+                url = "https://stockanalysis.com/markets/premarket/gainers/"
+                print(f"   -> 正在請求備用: {url}")
+                r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+            
+            # 確保狀態碼為 200 才進行解析
             if r.status_code == 200:
                 print("   -> 請求成功，開始解析...")
                 soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
                 
                 if table:
                     temp_stocks, temp_snip, temp_drop, current_scan = [], [], [], []
-                    rows = table.find_all('tr')[1:25]
-                    print(f"   -> 找到 {len(rows)} 筆資料，準備過濾 1-30 USD...")
                     
-                    for tr in rows:
+                    for tr in table.find_all('tr')[1:30]:
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
                         
                         sym = tds[1].text.strip()
-                        # 增加防呆：確保字串能轉換為浮點數
                         try:
                             p_num = float(tds[4].text.replace('$','').replace(',',''))
                         except ValueError:
@@ -231,7 +239,6 @@ def scanner_engine():
                         
                         if 1.0 <= p_num <= 30.0:
                             f, a, prev = get_static(sym)
-                            
                             try:
                                 vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
                             except ValueError:
@@ -261,14 +268,13 @@ def scanner_engine():
                             current_scan.append(item)
                             temp_stocks.append(item)
                             
-                            # 背景獲取新聞 (使用短 timeout 防止線程卡死)
                             if not cell["NewsList"]: 
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
                             MASTER_BRAIN["details"][sym] = {**cell, "Gap": item["Gap"], "Turnover": item["Turnover"], "RVOL": item["RVOL"], "FloatStr": float_str}
 
                     count += 1
-                    # ★ 保留 1000 筆歷史紀錄
+                    # ★ 歷史滾動：將新抓到的資料推到前面
                     new_live = (current_scan + MASTER_BRAIN["live"])[:1000]
                     
                     MASTER_BRAIN.update({
@@ -277,21 +283,21 @@ def scanner_engine():
                     })
                     print(f"✅ [SCAN END] 第 {count} 次掃描完成。")
                 else:
-                    print("❌ [ERROR] 找不到表格 <table>！網頁結構可能改變。")
+                    print("❌ [ERROR] 找不到表格 <table>！")
             else:
                 print(f"❌ [ERROR] 網站阻擋請求，狀態碼: {r.status_code}")
             
-            # 隨機冷卻，避免被封鎖
+            # 休息避免被封鎖
             wait_time = random.uniform(5.0, 10.0)
             print(f"⏳ 休息 {wait_time:.1f} 秒...")
             time.sleep(wait_time)
             
         except requests.exceptions.Timeout:
-            print("❌ [TIMEOUT] 請求 StockAnalysis 網頁超時！")
+            print("❌ [TIMEOUT] 請求超時！")
             time.sleep(10)
         except Exception as e:
-            print(f"🔥 [CRITICAL] 掃描迴圈崩潰: {e}")
-            time.sleep(10) # 崩潰後休息久一點再重試
+            print(f"🔥 [CRITICAL] 崩潰: {e}")
+            time.sleep(10)
 
 @app.route('/data')
 def get_data(): return jsonify(MASTER_BRAIN)
