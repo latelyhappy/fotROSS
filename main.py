@@ -24,13 +24,13 @@ stock_info_cache = {}
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI：保證新聞顯示與視窗縮放 ] ---
+# --- [ 1. 完整 UI：支援五大區塊、視窗縮放、新聞顯示 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V164.8 - 全功能修復版</title>
+    <title>ROSS Sniper V165.0 - 高頻狙擊模式</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -51,22 +51,22 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <div class="window" id="win-sniper" style="top:10px; left:10px; width:480px; height:320px;"><div class="title-bar">🚀 狙擊手 (起步第一根 K 線)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-live" style="top:10px; left:500px; width:480px; height:320px;"><div class="title-bar">📡 即時報警 (10s 循環)</div><div class="content" id="live-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-drop" style="top:340px; left:10px; width:480px; height:320px;"><div class="title-bar">📉 下跌警報 (Ross/拋售)</div><div class="content" id="drop-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-rank" style="top:340px; left:500px; width:480px; height:640px;"><div class="title-bar">🏆 排行 (1-30 USD 全掃描)</div><div class="content" id="rank-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-details" style="top:670px; left:10px; width:480px; height:310px;"><div class="title-bar">📊 數據詳情與新聞翻譯</div><div class="content" id="detail-list">點擊個股代碼...</div><div class="resize-handle"></div></div>
+    <div class="window" id="win-sniper" style="top:10px; left:10px; width:480px; height:320px;"><div class="title-bar">🚀 2. 狙擊手 (Gap > 3% + RVOL > 5x)</div><div class="content" id="sniper-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-live" style="top:10px; left:500px; width:480px; height:320px;"><div class="title-bar">📡 4. 即時報警 (3-5s 循環)</div><div class="content" id="live-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-drop" style="top:340px; left:10px; width:480px; height:320px;"><div class="title-bar">📉 5. 下跌警報 (Drop > 2%)</div><div class="content" id="drop-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-rank" style="top:340px; left:500px; width:480px; height:640px;"><div class="title-bar">🏆 3. 排行榜 (全欄位掃描)</div><div class="content" id="rank-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-details" style="top:670px; left:10px; width:480px; height:310px;"><div class="title-bar">📊 1. 數據詳情與新聞翻譯</div><div class="content" id="detail-list">點擊個股代碼...</div><div class="resize-handle"></div></div>
 
-    <div id="sys-status">🔄 數據鏈路啟動中...</div>
+    <div id="sys-status">🔄 掃描引擎同步中...</div>
 
     <script>
         async function refreshUI() {
             try {
                 const res = await fetch('/data');
                 const data = await res.json();
-                document.getElementById('sys-status').innerText = '✅ 同步時間: ' + new Date().toLocaleTimeString() + ' | 後端刷新: ' + data.last_update;
+                document.getElementById('sys-status').innerText = '✅ 同步時間: ' + new Date().toLocaleTimeString() + ' | 最後掃描: ' + data.last_update;
 
-                // 渲染狙擊手區塊
+                // 2. 狙擊手
                 let snipH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1fr 1.2fr;"><div>代碼</div><div>價格</div><div>漲幅$</div><div>訊號</div></div>';
                 data.sniper.forEach(s => {
                     snipH += `<div class="grid-row row-sniper" style="grid-template-columns: 0.8fr 1fr 1fr 1.2fr;" onclick="loadDetail('${s.Code}')">
@@ -75,8 +75,8 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('sniper-list').innerHTML = snipH;
 
-                // 渲染即時報警區塊
-                let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1fr;"><div>時間</div><div>代碼</div><div>價格</div><div>訊號</div></div>';
+                // 4. 即時報警
+                let liveH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1fr;"><div>時間</div><div>代碼</div><div>價格</div><div>動向</div></div>';
                 data.live.forEach(l => {
                     liveH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1fr;" onclick="loadDetail('${l.Code}')">
                         <div>${l.Time}</div><div class="text-blue">${l.Code}</div><div>${l.Price}</div><div>${l.Type}</div>
@@ -84,7 +84,7 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('live-list').innerHTML = liveH;
 
-                // 渲染下跌警報區塊
+                // 5. 下跌警報
                 let dropH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 1fr 1.1fr 1.1fr;"><div>代碼</div><div>價格</div><div>回落%</div><div>訊號</div></div>';
                 data.drop.forEach(d => {
                     dropH += `<div class="grid-row row-drop" style="grid-template-columns: 0.8fr 1fr 1.1fr 1.1fr;" onclick="loadDetail('${d.Code}')">
@@ -93,7 +93,7 @@ HTML_TEMPLATE = """
                 });
                 document.getElementById('drop-list').innerHTML = dropH;
 
-                // 渲染排行區塊 (全欄位)
+                // 3. 排行榜
                 let rankH = '<div class="grid-row grid-th" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1fr 0.8fr;"><div>代碼</div><div>漲幅%</div><div>漲幅$</div><div>浮動股</div><div>量比</div></div>';
                 data.stocks.forEach(s => {
                     rankH += `<div class="grid-row" style="grid-template-columns: 0.8fr 0.8fr 0.8fr 1fr 0.8fr;" onclick="loadDetail('${s.Code}')">
@@ -110,13 +110,9 @@ HTML_TEMPLATE = """
             const d = data.details[sym];
             if(!d) return;
 
-            // 新聞翻譯 HTML 構建
             let newsHTML = '<h3 style="margin-top:15px; border-bottom:1px solid #30363d;">📰 即時情報翻譯</h3>';
             d.NewsList.forEach(n => {
-                newsHTML += `<div class="news-item">
-                    <span style="color:#8b949e; font-size:10px;">🕒 ${n.time}</span><br>
-                    <a href="${n.link}" target="_blank" style="color:#f2cc60; text-decoration:none; font-weight:bold;">${n.title}</a>
-                </div>`;
+                newsHTML += `<div class="news-item"><span style="color:#8b949e; font-size:10px;">🕒 ${n.time}</span><br><a href="${n.link}" target="_blank" style="color:#f2cc60; text-decoration:none; font-weight:bold;">${n.title}</a></div>`;
             });
 
             document.getElementById('detail-list').innerHTML = `
@@ -125,12 +121,10 @@ HTML_TEMPLATE = """
                     <div class="p-box">換手率 (%)<div class="p-val" style="color:#f2cc60;">${d.Turnover}</div></div>
                     <div class="p-box">跳空幅 (%)<div class="p-val" style="color:#3fb950;">${d.Gap}</div></div>
                     <div class="p-box">平均量比 (RVOL)<div class="p-val">${d.RVOL}</div></div>
-                </div>
-                ${newsHTML}
-            `;
+                </div>${newsHTML}`;
         }
 
-        // 視窗交互邏輯 (拖曳與縮放)
+        // 視窗拖拽與縮放邏輯
         document.querySelectorAll('.window').forEach(win => {
             const title = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
@@ -151,13 +145,13 @@ HTML_TEMPLATE = """
                 document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; };
             };
         });
-        setInterval(refreshUI, 2000); // 2秒同步刷新
+        setInterval(refreshUI, 2000);
     </script>
 </body>
 </html>
 """
 
-# --- [ 2. 核心數據函數：恢復新聞抓取 ] ---
+# --- [ 2. 核心數據函數 ] ---
 def fetch_advanced_info(ticker):
     try:
         t = yf.Ticker(ticker); i = t.info
@@ -176,78 +170,62 @@ def fetch_news(ticker):
         for item in root.findall('./channel/item')[:3]:
             title_en = item.find('title').text.rsplit(" - ", 1)[0]
             dt = parser.parse(item.find('pubDate').text)
-            news_list.append({
-                'title': translator.translate(title_en),
-                'link': item.find('link').text,
-                'time': dt.strftime('%Y/%m/%d %H:%M')
-            })
+            news_list.append({'title': translator.translate(title_en), 'link': item.find('link').text, 'time': dt.strftime('%Y/%m/%d %H:%M')})
     except: pass
     return news_list
 
-# --- [ 3. 掃描引擎：嚴格控制 10秒 頻率與分流 ] ---
+# --- [ 3. 中央掃描引擎：高頻循環模式 ] ---
 def central_scanner():
     global MASTER_BRAIN
     while True:
         try:
+            # ★ 掃描開始即記錄時間
+            scan_time = datetime.now().strftime('%H:%M:%S')
+            
             r = requests.get("https://stockanalysis.com/markets/premarket/gainers/", headers=STEALTH_HEADERS, timeout=10)
-            soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
-            if table:
-                temp_rank, temp_snip, temp_drop, temp_live = [], [], [], []
-                for tr in table.find_all('tr')[1:35]:
-                    tds = tr.find_all('td')
-                    if len(tds) < 5: continue
-                    sym = tds[1].text.strip()
-                    p_num = float(tds[4].text.replace('$','').replace(',',''))
-                    
-                    if 1.0 <= p_num <= 30.0:
-                        f, a, prev = stock_info_cache.get(sym, fetch_advanced_info(sym))
-                        stock_info_cache[sym] = (f, a, prev)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
+                if table:
+                    temp_rank, temp_snip, temp_drop, temp_live = [], [], [], []
+                    for tr in table.find_all('tr')[1:35]:
+                        tds = tr.find_all('td')
+                        if len(tds) < 5: continue
+                        sym = tds[1].text.strip()
+                        p_num = float(tds[4].text.replace('$','').replace(',',''))
                         
-                        cell = MASTER_BRAIN["details"].get(sym, {"HOD": 0, "NewsList": []})
-                        vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
-                        
-                        if p_num > cell["HOD"]: cell["HOD"] = p_num
-                        gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
-                        rvol_v = vol_raw / a if a > 0 else 1.0
-                        drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
-
-                        item = {
-                            "Time": datetime.now().strftime('%H:%M:%S'), "Code": sym, "Price": f"${p_num:.2f}",
-                            "Change": tds[3].text, "ChangeAmt": f"${(p_num-prev):.2f}", "RVOL": f"{rvol_v:.1f}x",
-                            "Gap": f"{gap_p:.1f}%", "Turnover": f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%",
-                            "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}", 
-                            "FloatStr": f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K", "Type": "🆕NEW"
-                        }
-
-                        # 分流判定
-                        if gap_p > 3.0 and rvol_v > 5.0:
-                            item["Type"] = "🚀 第一根狙擊"; temp_snip.append(item)
-                        if drop_p < -2.0:
-                            item["Type"] = "🔴 Ross 下跌"; temp_drop.append(item)
-                        if p_num >= cell["HOD"]: 
-                            item["Type"] = "🔥 HOD 突破"
-                        
-                        temp_live.append(item); temp_rank.append(item)
-                        
-                        # 僅在新聞列表為空或發生重大訊號時更新新聞，節省 API 調用
-                        if not cell["NewsList"] or "🚀" in item["Type"]:
-                            item["NewsList"] = fetch_news(sym)
-                        else:
-                            item["NewsList"] = cell["NewsList"]
+                        if 1.0 <= p_num <= 30.0:
+                            f, a, prev = stock_info_cache.get(sym, fetch_advanced_info(sym))
+                            stock_info_cache[sym] = (f, a, prev)
                             
-                        MASTER_BRAIN["details"][sym] = item
-                
-                # 更新大腦數據
-                MASTER_BRAIN.update({
-                    "stocks": temp_rank, "sniper": temp_snip, 
-                    "drop": temp_drop, "live": temp_live,
-                    "last_update": datetime.now().strftime('%H:%M:%S')
-                })
+                            cell = MASTER_BRAIN["details"].get(sym, {"HOD": 0, "NewsList": []})
+                            vol_raw = float(tds[5].text.replace('K','000').replace('M','000000').replace(',',''))
+                            
+                            if p_num > cell["HOD"]: cell["HOD"] = p_num
+                            gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
+                            rvol_v = vol_raw / a if a > 0 else 1.0
+                            drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
 
-            time.sleep(random.uniform(7.0, 13.0)) # ★ 10s ±3s
-        except Exception as e:
-            print(f"Scanner Error: {e}")
-            time.sleep(10)
+                            item = {
+                                "Time": scan_time, "Code": sym, "Price": f"${p_num:.2f}",
+                                "Change": tds[3].text, "ChangeAmt": f"${(p_num-prev):.2f}", "RVOL": f"{rvol_v:.1f}x",
+                                "Gap": f"{gap_p:.1f}%", "Turnover": f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%",
+                                "Drop": f"{drop_p:.1f}%", "HOD": f"${cell['HOD']:.2f}", 
+                                "FloatStr": f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K", "Type": "🆕NEW"
+                            }
+
+                            if gap_p > 3.0 and rvol_v > 5.0: item["Type"] = "🚀 第一根狙擊"; temp_snip.append(item)
+                            if drop_p < -2.0: item["Type"] = "🔴 Ross 下跌"; temp_drop.append(item)
+                            if p_num >= cell["HOD"]: item["Type"] = "🔥 HOD 突破"
+                            
+                            temp_live.append(item); temp_rank.append(item)
+                            item["NewsList"] = cell["NewsList"] if cell["NewsList"] and "🚀" not in item["Type"] else fetch_news(sym)
+                            MASTER_BRAIN["details"][sym] = item
+                    
+                    MASTER_BRAIN.update({"stocks": temp_rank, "sniper": temp_snip, "drop": temp_drop, "live": temp_live, "last_update": scan_time})
+
+            # ★ 縮短冷卻時間：3-5秒 隨機
+            time.sleep(random.uniform(3.0, 5.0))
+        except: time.sleep(5)
 
 @app.route('/')
 def index(): return render_template_string(HTML_TEMPLATE)
