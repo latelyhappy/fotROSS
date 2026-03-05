@@ -33,7 +33,7 @@ HTML_TEMPLATE = """
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         
-        /* ★ 修改 1：區塊標題統一暗藍色背景 + 純白體字 ★ */
+        /* ★ 區塊標題統一暗藍色背景 + 純白體字 ★ */
         .title-bar { 
             background: #0d1f3d !important; 
             color: #ffffff !important; 
@@ -62,7 +62,7 @@ HTML_TEMPLATE = """
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         #zoom-controls button:hover { background: #30363d; }
         
-        /* ★ 修改 2：實戰閃爍動畫 (區分多空顏色) ★ */
+        /* ★ 實戰閃爍動畫 (區分多空顏色) ★ */
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } }
         
@@ -196,7 +196,6 @@ HTML_TEMPLATE = """
             return false;
         }
 
-        /* ★ 修改 3：加入 flashClass 參數，並將交易量設為黃色以提升辨識度 ★ */
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, flashClass="flash-green") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
             cols.forEach(c => html += `<div>${c}</div>`);
@@ -214,7 +213,7 @@ HTML_TEMPLATE = """
                     else if(c === '價格') html += `<div>${item.Price}</div>`;
                     else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
                     else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
-                    else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; // ★ 交易量加入亮黃標示
+                    else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
                     else if(c === '浮動股') html += `<div class="${formatFloat(item.FloatStr)}">${item.FloatStr}</div>`;
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`;
                     else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
@@ -248,7 +247,6 @@ HTML_TEMPLATE = """
                     ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 
-                /* ★ 修改 4：針對下捲區塊綁定專屬的紅/綠色閃爍 ★ */
                 // 4. HOD Momentum (綠色閃爍)
                 if (!isLivePaused) {
                     document.getElementById('hod-list').innerHTML = buildTable(
@@ -354,7 +352,6 @@ def get_static(ticker):
         return f, a, p
     except: return 1000000, 500000, 1.0
 
-# ★ 修改 5：精準轉換 K 與 M 顯示格式 (百萬級改為小數點1位，視覺更俐落) ★
 def format_vol_km(v_float):
     if v_float >= 1_000_000:
         return f"{v_float/1_000_000:.1f}M"
@@ -370,6 +367,85 @@ def parse_vol(v_str):
         if 'K' in v_str: return float(v_str.replace('K', '')) * 1e3
         return float(v_str)
     except: return 0.0
+
+# ★ 新增：即時抓取 NASDAQ 官方熔斷 (Trade Halts) 數據 ★
+def fetch_official_halts():
+    global MASTER_BRAIN
+    try:
+        # 這是 NASDAQ 官方提供的免費即時熔斷 XML 資料流
+        url = "http://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
+        r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+        
+        # 移除 XML 的 Namespace 以便輕鬆解析
+        xml_data = r.text.replace('ndaq:', '') 
+        root = ET.fromstring(xml_data)
+        
+        tz_tw = pytz.timezone('Asia/Taipei')
+        tz_us = pytz.timezone('US/Eastern')
+        now_us = datetime.now(tz_us)
+        today_us_str = now_us.strftime("%m/%d/%Y") # NASDAQ 格式為 MM/DD/YYYY
+        
+        new_halts = []
+        # 已存在畫面上的熔斷代碼，避免重複添加
+        existing_halt_syms = [h["Code"] for h in MASTER_BRAIN["halts"]]
+        
+        for item in root.findall('./channel/item'):
+            halt_date = item.find('HaltDate')
+            # 只抓取「今天」發生的熔斷
+            if halt_date is None or halt_date.text != today_us_str:
+                continue
+                
+            title = item.find('title')
+            if title is None: continue
+            sym = title.text.replace('Symbol: ', '').strip()
+            
+            # 如果已經在畫面上，就跳過
+            if sym in existing_halt_syms:
+                continue
+                
+            halt_time_us = item.find('HaltTime').text # 例如: 09:35:12
+            
+            # 將美國東岸時間精準轉換為台灣時間
+            try:
+                dt_us = datetime.strptime(f"{today_us_str} {halt_time_us}", "%m/%d/%Y %H:%M:%S")
+                dt_us = tz_us.localize(dt_us)
+                time_tw_str = dt_us.astimezone(tz_tw).strftime('%H:%M:%S')
+            except:
+                time_tw_str = halt_time_us # 轉換失敗則顯示原時間
+                
+            # 抓取該檔股票的基礎資料以供 UI 顯示
+            f, a, prev = get_static(sym)
+            try:
+                # 這裡簡單使用 yf 抓取當下最新價格
+                t = yf.Ticker(sym)
+                price = t.info.get('regularMarketPrice', prev)
+                vol = t.info.get('regularMarketVolume', 0)
+                if price is None: price = prev
+                if vol is None: vol = 0
+            except:
+                price = prev; vol = 0
+                
+            gap_p = ((price - prev) / prev * 100) if prev > 0 else 0
+            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+            
+            halt_item = {
+                "Time": time_tw_str, "Code": sym, "Price": f"${price:.2f}",
+                "Change": f"{gap_p:.2f}%", 
+                "Volume": format_vol_km(vol), # 量化成交量
+                "RVOL": "N/A", "Gap": f"{gap_p:.2f}%", "Drop": "0.0%",
+                "FloatStr": float_str, "Turnover": "0%", 
+                "Streak": "x1", "gap_num": gap_p, "rvol_num": 0, "f_num": f
+            }
+            new_halts.append(halt_item)
+            
+        # 若有新熔斷股票，將其「插頂」加入歷史清單
+        if new_halts:
+            # 依照時間順序反轉（最新的在最上面）
+            new_halts.reverse()
+            MASTER_BRAIN["halts"] = (new_halts + MASTER_BRAIN["halts"])[:1000]
+            
+    except Exception as e:
+        pass # 背景靜默錯誤，不影響主系統運作
 
 # --- [ 3. 中央引擎：7 路智能分流 ] ---
 def scanner_engine():
@@ -401,7 +477,8 @@ def scanner_engine():
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 if table:
-                    t_all, c_hod, c_surge, c_wash, c_halt = [], [], [], [], []
+                    # ★ 修改：移除了 c_halt 的定義與假熔斷邏輯
+                    t_all, c_hod, c_surge, c_wash = [], [], [], []
                     
                     for tr in table.find_all('tr')[1:40]: 
                         tds = tr.find_all('td')
@@ -444,11 +521,6 @@ def scanner_engine():
                             }
                             t_all.append(item)
 
-                            # 1. 極端波動準熔斷
-                            if gap_p > 15.0 and rvol > 5.0 and cell["last_act"] != "halt":
-                                c_halt.append(item)
-                                cell["last_act"] = "halt"
-                                
                             # 2. 高檔大幅回落
                             if drop_p < -2.0 and cell["last_act"] != f"drop_{drop_p:.0f}":
                                 c_wash.append(item)
@@ -474,14 +546,17 @@ def scanner_engine():
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                     ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
                     
+                    # ★ 修改：在此處移除了 "halts" 陣列的更新，交由 fetch_official_halts 專職處理
                     MASTER_BRAIN.update({
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
                         "washouts": (c_wash + MASTER_BRAIN["washouts"])[:1000],
-                        "halts": (c_halt + MASTER_BRAIN["halts"])[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
+            
+            # ★ 呼叫：每次迴圈同步抓取 NASDAQ 官方的真實熔斷資訊 ★
+            fetch_official_halts()
             
             time.sleep(random.uniform(5.0, 10.0))
         except: time.sleep(10)
