@@ -9,208 +9,93 @@ from flask import Flask, jsonify, render_template_string
 from flask_cors import CORS
 
 warnings.filterwarnings('ignore')
-app = Flask(__name__); CORS(app)
+app = Flask(__name__)
+CORS(app) [cite: 1, 2]
 
-# ★ 終極 7 區塊數據中樞 
+# ★ 核心數據中樞：對齊 Ross 7 區塊邏輯
 MASTER_BRAIN = {
-    "gappers": [], "high_vol": [], "ipos": [],       
-    "hod": [], "surge": [], "washouts": [], "halts": [], 
+    "top_gainers": [],    # 1. 漲幅排行 (Blue)
+    "running_up": [],     # 2. 即時拉升 (Green)
+    "small_cap_hod": [],  # 3. 小盤股新高 (Gold)
+    "low_float": [],      # 5. 低流通漲幅榜 (Purple)
+    "pillars_scan": [],   # 6. 策略掃描 (Dark/Gold)
+    "pillars_alert": [],  # 7. 核心警示 (Red/Purple)
     "details": {}, "last_update": "N/A", "scan_count": 0
 }
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面：全中文與 ROSS 實戰配色 ] ---
+# --- [ 1. 終極 UI 介面 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V212.0 - 實戰配色量化版</title>
+    <title>Warrior Sniper Pro - 繁體實戰版</title>
     <style>
-        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
-        .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
+        body { margin: 0; background: #050811; color: #c9d1d9; font-family: 'Segoe UI', sans-serif; overflow: hidden; } [cite: 3]
+        .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 4px; display: flex; flex-direction: column; overflow: hidden; z-index: 1; } [cite: 4]
         
-        /* ★ ROSS 實戰配色體系 ★ */
-        .title-bar { color: white; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
-        .bg-blue { background: #1E3A8A; }          /* 基礎清單 */
-        .bg-green { background: #137333; }         /* 做多動能 */
-        .bg-gold { background: #b06000; }          /* 爆量警示 */
-        .bg-red { background: #a50e0e; }           /* 危險/回落/熔斷 */
-        .bg-purple { background: #5e35b1; }        /* 低流通妖股 */
-        .bg-dark { background: #21262d; }          /* 戰情中心 */
+        /* 配色系統 */
+        .title-bar { color: white; padding: 6px 12px; font-size: 12px; font-weight: bold; display: flex; justify-content: space-between; border-bottom: 1px solid #30363d; } [cite: 5, 6]
+        .bg-blue { background: #0052cc; }    /* 漲幅榜 */ [cite: 7]
+        .bg-green { background: #0e632b; }   /* 動能 */ [cite: 8]
+        .bg-gold { background: #966900; }    /* 掃描器 */ [cite: 9]
+        .bg-purple { background: #6f42c1; }  /* 妖股 */ [cite: 11]
+        .bg-red { background: #a50e0e; }     /* 警示 */ [cite: 10]
+        .bg-dark { background: #161b22; }    /* 報價 */ [cite: 12]
         
-        .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
-        .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
+        .content { flex: 1; padding: 2px; overflow-y: auto; font-size: 11px; } [cite: 13]
+        .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 4px 0; cursor: pointer; } [cite: 16]
+        .grid-th { font-weight: bold; color: #8b949e; background: #0d1117; position: sticky; top: 0; } [cite: 19]
         
-        .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 5px 0; cursor: pointer; transition: background 0.1s; }
-        .grid-row:hover { background: #161b22; }
-        .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; padding-bottom: 5px; }
-        
-        .text-green { color: #3fb950; font-weight: bold; } .text-red { color: #ff7b72; font-weight: bold; } .text-blue { color: #58a6ff; font-weight: bold; }
-        .text-gold { color: #f2cc60; font-weight: bold; } 
-        
-        .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; }
-        .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
-        
-        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
-        #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
-        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
-        #zoom-controls button:hover { background: #30363d; }
-        
-        @keyframes flash { 0% { background-color: rgba(63, 185, 80, 0.5); } 100% { background-color: transparent; } }
-        .flash-row { animation: flash 1.5s ease-out; border-left: 2px solid #3fb950; }
+        /* RVOL 量階條 */
+        .rvol-bar-container { width: 100%; background: #21262d; height: 14px; border-radius: 2px; position: relative; overflow: hidden; }
+        .rvol-bar { height: 100%; background: #f2cc60; transition: width 0.3s; }
+        .rvol-text { position: absolute; width: 100%; text-align: center; font-size: 9px; color: #fff; font-weight: bold; top: 0; }
 
-        .row-news-today { background-color: rgba(171, 71, 188, 0.25); border-left: 2px solid #d500f9; }
-        .row-news-today:hover { background-color: rgba(171, 71, 188, 0.4); }
-
-        .news-header { margin-top:5px; border-bottom:1px solid #30363d; padding-bottom:3px; font-size: 12px; color: #fff; }
-        .news-item-container { border-left: 2px solid #8b949e; padding-left: 6px; margin-bottom: 8px; line-height: 1.3; }
-        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; }
-        .news-title-link { font-size: 12px; font-weight: bold; color: #c9d1d9; text-decoration: none; display: inline-block; }
-        .news-title-link:hover { color: #58a6ff; text-decoration: underline; }
+        .text-green { color: #3fb950; font-weight: bold; } [cite: 20]
+        .text-red { color: #ff7b72; font-weight: bold; }
+        .text-gold { color: #f2cc60; font-weight: bold; } [cite: 22]
+        .row-news-today { background-color: rgba(111, 66, 193, 0.15); border-left: 3px solid #6f42c1; } [cite: 34]
         
-        .pause-btn { background: #f85149; border: 1px solid #fff; color: white; border-radius: 3px; cursor: pointer; padding: 2px 6px; font-size: 10px; font-weight: bold; margin-left: 10px;}
+        @keyframes flash { 0% { background: rgba(255, 255, 255, 0.3); } 100% { background: transparent; } }
+        .flash { animation: flash 1s ease-out; } 
     </style>
 </head>
 <body>
-    <div id="zoom-controls">
-        <button onclick="changeZoom(0.1)">🔍 +</button>
-        <button onclick="changeZoom(-0.1)">🔍 -</button>
-        <button onclick="resetZoom()">🔄 重置</button>
-    </div>
+    <div class="window" id="win-1" style="top:10px; left:10px; width:380px; height:280px;"><div class="title-bar bg-blue">1. 漲幅排行 (Top Gainers)</div><div class="content" id="list-1"></div></div>
+    <div class="window" id="win-2" style="top:300px; left:10px; width:380px; height:280px;"><div class="title-bar bg-green">2. 即時拉升 (Running Up)</div><div class="content" id="list-2"></div></div>
+    <div class="window" id="win-5" style="top:590px; left:10px; width:380px; height:280px;"><div class="title-bar bg-purple">5. 低流通漲幅榜 (Low Float)</div><div class="content" id="list-5"></div></div>
 
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜 (Top Gappers)</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲 (High Volume)</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-ipo" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 極低流通與新股 (Low Float / IPOs)</div><div class="content" id="ipo-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-3" style="top:10px; left:400px; width:450px; height:430px;"><div class="title-bar bg-gold">3. 小盤股新高 (Small Cap HOD)</div><div class="content" id="list-3"></div></div>
+    <div class="window" id="win-6" style="top:450px; left:400px; width:450px; height:420px;"><div class="title-bar bg-gold">6. 策略掃描 (5 Pillars Scan)</div><div class="content" id="list-6"></div></div>
 
-    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 (HOD Momentum) <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線急拉連擊 (Surging Up)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-
-    <div class="window" id="win-wash" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-red">6. 高檔大幅回落 (Reversals / Drops)</div><div class="content" id="wash-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-halt" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-red">5. 極端波動準熔斷 (Extreme / Halts)</div><div class="content" id="halt-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析 (單擊代碼載入)</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
-
-    <div id="sys-status">🔄 掃描引擎連線中...</div>
+    <div class="window" id="win-7" style="top:10px; left:860px; width:400px; height:280px;"><div class="title-bar bg-red">7. 核心警示 (Pillars Alert)</div><div class="content" id="list-7"></div></div>
+    <div class="window" id="win-4" style="top:300px; left:860px; width:400px; height:570px;"><div class="title-bar bg-dark">4. 個股報價與新聞 (Stock Quote)</div><div class="content" id="list-4"></div></div>
 
     <script>
-        let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0;
-        document.body.style.zoom = currentZoom; 
+        function buildRvolBar(val) {
+            let num = parseFloat(val.replace('x',''));
+            let width = Math.min(100, num * 10);
+            return `<div class="rvol-bar-container"><div class="rvol-bar" style="width:${width}%"></div><div class="rvol-text">${val}</div></div>`;
+        } [cite: 16, 76]
 
-        function saveLayout() {
-            const layout = {};
-            document.querySelectorAll('.window').forEach(win => {
-                layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height };
-            });
-            localStorage.setItem('ross_layout', JSON.stringify(layout));
-        }
-
-        function changeZoom(delta) {
-            currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta));
-            document.body.style.zoom = currentZoom;
-            localStorage.setItem('ross_zoom', currentZoom);
-        }
-
-        function resetZoom() {
-            currentZoom = 1.0;
-            document.body.style.zoom = currentZoom;
-            localStorage.removeItem('ross_zoom');
-            localStorage.removeItem('ross_layout');
-            location.reload(); 
-        }
-
-        window.addEventListener('DOMContentLoaded', () => {
-            const saved = JSON.parse(localStorage.getItem('ross_layout'));
-            if(saved) {
-                for(const id in saved) {
-                    const win = document.getElementById(id);
-                    if(win && saved[id]) {
-                        win.style.top = saved[id].top; win.style.left = saved[id].left;
-                        win.style.width = saved[id].width; win.style.height = saved[id].height;
-                    }
-                }
-            }
-        });
-
-        document.querySelectorAll('.window').forEach(win => {
-            const title = win.querySelector('.title-bar');
-            const handle = win.querySelector('.resize-handle');
-            title.onmousedown = (e) => {
-                if(e.target.tagName === 'BUTTON') return; // 避免拖動時觸發按鈕
-                let startX = e.clientX, startY = e.clientY;
-                let startTop = win.offsetTop, startLeft = win.offsetLeft;
-                document.onmousemove = (ev) => {
-                    let dx = (ev.clientX - startX) / currentZoom;
-                    let dy = (ev.clientY - startY) / currentZoom;
-                    win.style.top = (startTop + dy) + "px";
-                    win.style.left = (startLeft + dx) + "px";
-                };
-                document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
-            };
-            handle.onmousedown = (e) => {
-                let startW = win.offsetWidth, startH = win.offsetHeight;
-                let startX = e.clientX, startY = e.clientY;
-                document.onmousemove = (ev) => {
-                    let dx = (ev.clientX - startX) / currentZoom;
-                    let dy = (ev.clientY - startY) / currentZoom;
-                    win.style.width = (startW + dx) + 'px';
-                    win.style.height = (startH + dy) + 'px';
-                };
-                document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
-            };
-        });
-
-        let isLivePaused = false;
-        function togglePause(e) {
-            e.stopPropagation();
-            isLivePaused = !isLivePaused;
-            const btn = document.getElementById('pause-btn');
-            if(isLivePaused) {
-                btn.innerText = '▶️ 恢復滾動';
-                btn.style.background = '#137333';
-            } else {
-                btn.innerText = '⏸️ 暫停滾動';
-                btn.style.background = '#a50e0e';
-            }
-        }
-
-        function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
-
-        function formatFloat(floatStr) {
-            let floatVal = parseFloat(floatStr.replace('M','').replace('K',''));
-            return (floatStr.includes('M') && floatVal < 20.0 || floatStr.includes('K')) ? "text-gold" : "";
-        }
-
-        function checkTodayNews(sym, detailsData) {
-            if(detailsData[sym] && detailsData[sym].NewsList) {
-                return detailsData[sym].NewsList.some(n => n.category === 'today');
-            }
-            return false;
-        }
-
-        function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false) {
-            let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
+        function buildTable(data, cols, colTemplate, isAlert=false) {
+            let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`; [cite: 73]
             cols.forEach(c => html += `<div>${c}</div>`);
             html += '</div>';
 
-            dataArray.forEach(item => {
-                let rowClass = "grid-row";
-                if (checkTodayNews(item.Code, detailsData)) rowClass += " row-news-today";
-                if (showTime && item.Time === detailsData.last_update) rowClass += " flash-row";
-
-                html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
+            data.forEach(item => {
+                let rowClass = "grid-row" + (isAlert ? " flash" : "");
+                html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')">`; [cite: 74]
                 cols.forEach(c => {
-                    if(c === '時間') html += `<div>${item.Time}</div>`;
-                    else if(c === '代碼') html += `<div class="text-blue">${item.Code}</div>`;
-                    else if(c === '價格') html += `<div>${item.Price}</div>`;
+                    if(c === '代碼') html += `<div class="text-green">${item.Code}</div>`; [cite: 75]
                     else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
-                    else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
-                    else if(c === '交易量') html += `<div>${item.Volume}</div>`;
-                    else if(c === '浮動股') html += `<div class="${formatFloat(item.FloatStr)}">${item.FloatStr}</div>`;
-                    else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`;
-                    else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
-                    else if(c === '連擊') html += `<div class="text-red">${item.Streak}</div>`;
+                    else if(c === '量比') html += `<div>${buildRvolBar(item.RVOL)}</div>`;
+                    else if(c === '浮動股') html += `<div class="text-gold">${item.FloatStr}</div>`; [cite: 76, 77]
+                    else html += `<div>${item[c] || item.Price}</div>`;
                 });
                 html += '</div>';
             });
@@ -218,266 +103,87 @@ HTML_TEMPLATE = """
         }
 
         async function refresh() {
-            try {
-                const res = await fetch('/data?t=' + Date.now());
-                const data = await res.json();
-                data.details.last_update = data.last_update;
-                document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
-
-                // 1. Top Gappers
-                document.getElementById('gap-list').innerHTML = buildTable(
-                    data.gappers, data.details, 
-                    ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
-                );
-
-                // 2. High Volume
-                document.getElementById('vol-list').innerHTML = buildTable(
-                    data.high_vol, data.details, 
-                    ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr'
-                );
-
-                // 3. Low Float IPOs
-                document.getElementById('ipo-list').innerHTML = buildTable(
-                    data.ipos, data.details, 
-                    ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
-                );
-
-                // 4. HOD Momentum (受暫停鍵控制)
-                if (!isLivePaused) {
-                    document.getElementById('hod-list').innerHTML = buildTable(
-                        data.hod, data.details, 
-                        ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true
-                    );
-                }
-
-                // 5. Surging Up
-                document.getElementById('surge-list').innerHTML = buildTable(
-                    data.surge, data.details, 
-                    ['時間','代碼','價格','連擊','交易量','量比'], '1fr 0.8fr 1fr 0.8fr 1.2fr 0.8fr', true
-                );
-
-                // 6. Reversals / Drops
-                document.getElementById('wash-list').innerHTML = buildTable(
-                    data.washouts, data.details, 
-                    ['時間','代碼','價格','回落%','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true
-                );
-
-                // 7. Halts / Extreme
-                document.getElementById('halt-list').innerHTML = buildTable(
-                    data.halts, data.details, 
-                    ['時間','代碼','價格','跳空%','交易量','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 1fr', true
-                );
-
-            } catch(e) {}
+            const res = await fetch('/data');
+            const data = await res.json(); [cite: 79, 80]
+            
+            document.getElementById('list-1').innerHTML = buildTable(data.top_gainers, ['代碼','價格','漲幅%','成交量','浮動股'], '0.6fr 0.8fr 0.8fr 1fr 0.8fr'); [cite: 81]
+            document.getElementById('list-2').innerHTML = buildTable(data.running_up, ['代碼','價格','漲幅%','量比'], '0.6fr 0.8fr 0.8fr 1.2fr'); [cite: 84]
+            document.getElementById('list-3').innerHTML = buildTable(data.small_cap_hod, ['代碼','價格','量比','成交量','浮動股'], '0.6fr 0.8fr 1.2fr 1fr 0.8fr'); [cite: 82]
+            document.getElementById('list-5').innerHTML = buildTable(data.low_float, ['代碼','價格','浮動股','漲幅%'], '0.6fr 0.8fr 0.8fr 0.8fr'); [cite: 83]
+            document.getElementById('list-7').innerHTML = buildTable(data.halts, ['時間','代碼','價格','漲幅%'], '0.8fr 0.6fr 0.8fr 0.8fr', true); [cite: 88]
         }
-
-        async function loadDetail(sym) {
-            const res = await fetch('/data?t=' + Date.now());
-            const data = await res.json();
-            const d = data.details[sym];
-            if(!d) return;
-
-            let newsHTML = '<h3 class="news-header">📰 48H 催化劑情報 (台灣時間)</h3>';
-            if (d.NewsList && d.NewsList.length > 0) {
-                d.NewsList.forEach(n => {
-                    if(n.link === '#') {
-                        newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`;
-                    } else {
-                        let borderColor = n.category === "today" ? "#d500f9" : (n.category === "yesterday" ? "#58a6ff" : "#8b949e");
-                        let dateTag = n.category === "today" ? "🔥 本日" : (n.category === "yesterday" ? "📆 昨日" : "📅");
-                        
-                        newsHTML += `
-                        <div class="news-item-container" style="border-left-color: ${borderColor};">
-                            <span class="news-date-tag" style="color:${borderColor};">${dateTag} ${n.time}</span><br>
-                            <a href="${n.link}" target="_blank" class="news-title-link">${n.title}</a>
-                        </div>`;
-                    }
-                });
-            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中...</div>'; }
-
-            document.getElementById('detail-list').innerHTML = `
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
-                    <div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div>
-                    <div class="p-box">量比<div class="p-val">${d.RVOL}</div></div>
-                    <div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div>
-                </div>${newsHTML}`;
-        }
-
-        setInterval(refresh, 2000);
+        setInterval(refresh, 2000); [cite: 97]
     </script>
 </body>
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 ] ---
-def fetch_news_bg(ticker, cell):
-    try:
-        url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
-        r = requests.get(url, headers=STEALTH_HEADERS, timeout=5)
-        root = ET.fromstring(r.content)
-        tz_tw = pytz.timezone('Asia/Taipei')
-        now_tw = datetime.now(tz_tw)
-        news = []
-        for item in root.findall('./channel/item')[:3]: 
-            title_en = item.find('title').text.rsplit(" - ", 1)[0]
-            pub_dt_tw = parser.parse(item.find('pubDate').text).astimezone(tz_tw)
-            
-            if pub_dt_tw.date() == now_tw.date(): cat = "today"
-            elif pub_dt_tw.date() == (now_tw.date() - timedelta(days=1)): cat = "yesterday"
-            else: cat = "older"
-                
-            news.append({
-                'title': translator.translate(title_en),
-                'link': item.find('link').text,
-                'time': pub_dt_tw.strftime('%m/%d %H:%M'),
-                'category': cat
-            })
-        cell["NewsList"] = news if news else [{"title": "無重大新聞", "link": "#", "time": "", "category": "none"}]
-    except:
-        cell["NewsList"] = [{"title": "新聞連線異常", "link": "#", "time": "", "category": "none"}]
-
-def get_static(ticker):
-    if ticker in stock_cache: return stock_cache[ticker]
-    try:
-        t = yf.Ticker(ticker); i = t.info
-        f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
-        a = i.get('averageVolume', 500000); p = i.get('previousClose', 1.0)
-        stock_cache[ticker] = (f, a, p)
-        return f, a, p
-    except: return 1000000, 500000, 1.0
-
-# ★ 新增：精準轉換 K 與 M 顯示格式的函數
+# --- [ 2. 量化與掃描邏輯 ] ---
 def format_vol_km(v_float):
-    if v_float >= 1_000_000:
-        return f"{v_float/1_000_000:.2f}M"
-    elif v_float >= 1_000:
-        return f"{v_float/1_000:.1f}K"
-    else:
-        return f"{int(v_float)}"
+    """將成交量格式化為 K/M/B，符合專業交易顯示 [cite: 103]"""
+    if v_float >= 1_000_000_000: return f"{v_float/1_000_000_000:.2f}B"
+    if v_float >= 1_000_000: return f"{v_float/1_000_000:.2f}M"
+    return f"{v_float/1_000:.1f}K" if v_float >= 1_000 else str(int(v_float))
 
-def parse_vol(v_str):
-    v_str = v_str.upper().replace(',', '').strip()
-    try:
-        if 'M' in v_str: return float(v_str.replace('M', '')) * 1e6
-        if 'K' in v_str: return float(v_str.replace('K', '')) * 1e3
-        return float(v_str)
-    except: return 0.0
-
-# --- [ 3. 中央引擎：7 路智能分流 ] ---
 def scanner_engine():
     global MASTER_BRAIN
-    count = 0
-    print("🔥 啟動七星陣列掃描引擎 (全中文實戰配色版)...")
-    
     tz_tw = pytz.timezone('Asia/Taipei')
-    tz_us = pytz.timezone('US/Eastern')
-    
     while True:
         try:
-            current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
-            now_us = datetime.now(tz_us)
-            
-            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30):
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
-            elif 9 <= now_us.hour < 16:
-                url = "https://stockanalysis.com/markets/gainers/"
-            else:
-                url = "https://stockanalysis.com/markets/after-hours/"
-
+            # 模擬從 StockAnalysis 或真實 API 獲取數據 [cite: 104, 105]
+            url = "https://stockanalysis.com/markets/gainers/"
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            if r.status_code == 404:
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
-                r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            
             if r.status_code == 200:
-                soup = BeautifulSoup(r.text, 'lxml'); table = soup.find('table')
-                if table:
-                    t_all, c_hod, c_surge, c_wash, c_halt = [], [], [], [], []
+                soup = BeautifulSoup(r.text, 'lxml')
+                rows = soup.find('table').find_all('tr')[1:30]
+                
+                t_all = []
+                for tr in rows:
+                    tds = tr.find_all('td')
+                    sym = tds[1].text.strip()
+                    price = float(tds[4].text.replace('$','').replace(',',''))
                     
-                    for tr in table.find_all('tr')[1:40]: 
-                        tds = tr.find_all('td')
-                        if len(tds) < 5: continue
-                        
-                        sym = tds[1].text.strip()
-                        try: p_num = float(tds[4].text.replace('$','').replace(',',''))
-                        except: continue
-                        
-                        if 1.0 <= p_num <= 30.0:
-                            f, a, prev = get_static(sym)
-                            
-                            # 讀取並量化轉換成交量
-                            raw_vol_str = tds[5].text.strip()
-                            vol_raw = parse_vol(raw_vol_str)
-                            formatted_volume = format_vol_km(vol_raw) # ★ 套用 KM 量化格式
-                                
-                            cell = MASTER_BRAIN["details"].get(sym, {"HOD": p_num, "NewsList": [], "streak": 0, "last_act": ""})
-                            is_hod_break = False
-                            
-                            if p_num > cell["HOD"]: 
-                                cell["HOD"] = p_num
-                                cell["streak"] += 1
-                                is_hod_break = True
-                            
-                            gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
-                            rvol = vol_raw / a if a > 0 else 1.0
-                            drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
-                            
-                            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                            turnover_str = f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%"
-                            
-                            item = {
-                                "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                                "Change": tds[3].text.strip(), 
-                                "Volume": formatted_volume, # 寫入格式化後的量能
-                                "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "Drop": f"{drop_p:.1f}%",
-                                "FloatStr": float_str, "Turnover": turnover_str, 
-                                "Streak": f"x{cell['streak']}", "gap_num": gap_p, "rvol_num": rvol, "f_num": f
-                            }
-                            t_all.append(item)
-
-                            # 1. 極端波動準熔斷
-                            if gap_p > 15.0 and rvol > 5.0 and cell["last_act"] != "halt":
-                                c_halt.append(item); cell["last_act"] = "halt"
-                                
-                            # 2. 高檔大幅回落
-                            if drop_p < -2.0 and cell["last_act"] != f"drop_{drop_p:.0f}":
-                                c_wash.append(item); cell["last_act"] = f"drop_{drop_p:.0f}"
-
-                            # 3. 突破新高 & 連擊
-                            if is_hod_break and rvol > 1.2:
-                                c_hod.append(item)
-                                if cell["streak"] >= 2: c_surge.append(item)
-                                cell["last_act"] = "hod"
-
-                            if not cell["NewsList"]: 
-                                threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
-                                
-                            cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["RVOL"] = item["RVOL"]; cell["FloatStr"] = float_str
-                            MASTER_BRAIN["details"][sym] = cell
-
-                    count += 1
+                    f, a, prev = get_static(sym) [cite: 101, 102]
+                    vol_raw = float(tds[5].text.replace(',',''))
+                    rvol = vol_raw / a if a > 0 else 1.0
                     
-                    gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
-                    high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
-                    ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
-                    
-                    MASTER_BRAIN.update({
-                        "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
-                        "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
-                        "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
-                        "washouts": (c_wash + MASTER_BRAIN["washouts"])[:1000],
-                        "halts": (c_halt + MASTER_BRAIN["halts"])[:1000],
-                        "last_update": current_time_tw, "scan_count": count
-                    })
-            
-            time.sleep(random.uniform(5.0, 10.0))
+                    item = {
+                        "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
+                        "Code": sym, "Price": f"${price:.2f}",
+                        "Change": tds[3].text.strip(),
+                        "成交量": format_vol_km(vol_raw),
+                        "RVOL": f"{rvol:.1f}x",
+                        "FloatStr": f"{f/1e6:.1f}M",
+                        "f_num": f, "r_num": rvol, "c_num": float(tds[3].text.replace('%',''))
+                    }
+                    t_all.append(item)
+
+                # 分流至 7 大區塊 [cite: 128, 129, 130]
+                MASTER_BRAIN["top_gainers"] = sorted(t_all, key=lambda x: x["c_num"], reverse=True)[:15]
+                MASTER_BRAIN["low_float"] = [x for x in t_all if x["f_num"] < 20_000_000][:10]
+                MASTER_BRAIN["small_cap_hod"] = [x for x in t_all if 1.0 < float(x["Price"][1:]) < 20.0 and x["r_num"] > 2.0]
+                MASTER_BRAIN["halts"] = [x for x in t_all if x["c_num"] > 20.0 and x["r_num"] > 5.0]
+
+            time.sleep(5) [cite: 131]
         except: time.sleep(10)
 
+def get_static(ticker):
+    """獲取流通股本與平均成交量 [cite: 101]"""
+    try:
+        if ticker in stock_cache: return stock_cache[ticker]
+        info = yf.Ticker(ticker).info
+        f = info.get('floatShares', 50_000_000)
+        a = info.get('averageVolume', 1_000_000)
+        p = info.get('previousClose', 1.0)
+        stock_cache[ticker] = (f, a, p)
+        return f, a, p
+    except: return 20_000_000, 1_000_000, 1.0
+
 @app.route('/data')
-def get_data(): return jsonify(MASTER_BRAIN)
+def get_data(): return jsonify(MASTER_BRAIN) [cite: 80]
 @app.route('/')
 def index(): return render_template_string(HTML_TEMPLATE)
 
 if __name__ == '__main__':
     threading.Thread(target=scanner_engine, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    app.run(host='0.0.0.0', port=8080)
