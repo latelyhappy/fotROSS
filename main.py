@@ -217,7 +217,7 @@ HTML_TEMPLATE = """
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`;
                     else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
                     else if(c === '狀態') html += `<div class="text-red">${item.Drop}</div>`; 
-                    else if(c === '動能指標') html += `<div class="text-green">${item.Streak}</div>`; // ★ 修改：改名並顯示為綠色以突顯急噴/連漲
+                    else if(c === '動能指標') html += `<div class="text-green">${item.Streak}</div>`; 
                 });
                 html += '</div>';
             });
@@ -251,7 +251,6 @@ HTML_TEMPLATE = """
                     );
                 }
 
-                // ★ 修改：配合「急噴」文字長度，將欄位名稱改為'動能指標'並稍微加寬空間
                 document.getElementById('surge-list').innerHTML = buildTable(
                     data.surge, data.details, 
                     ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green'
@@ -451,7 +450,6 @@ def scanner_engine():
                 if table:
                     t_all, c_hod, c_surge, c_wash = [], [], [], []
                     
-                    # ★ 修改 1：擴大範圍到前 100 名，絕不漏接
                     for tr in table.find_all('tr')[1:100]: 
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
@@ -460,7 +458,6 @@ def scanner_engine():
                         try: p_num = float(tds[4].text.replace('$','').replace(',',''))
                         except: continue
                         
-                        # ★ 修改 2：放寬價格守備範圍 (0.5 到 50塊)
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
                             
@@ -468,14 +465,13 @@ def scanner_engine():
                             vol_raw = parse_vol(raw_vol_str)
                             formatted_volume = format_vol_km(vol_raw)
                             
-                            # ★ 修改 3：破除定錨盲區！初次遇見股票時，視歷史高點為現價的98%
                             is_new_stock = sym not in MASTER_BRAIN["details"]
                             initial_hod = (p_num * 0.98) if is_new_stock else p_num
                             
                             cell = MASTER_BRAIN["details"].get(sym, {
                                 "HOD": initial_hod, "NewsList": [], "streak": 0, "last_act": "",
                                 "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
-                                "up_ticks": 0 # ★ 新增：初始化連續上漲次數
+                                "up_ticks": 0, "last_grind_tick": 0 # ★ 新增：初始化連漲記憶
                             })
                             
                             is_hod_break = False
@@ -501,7 +497,6 @@ def scanner_engine():
                             }
                             t_all.append(item)
 
-                            # --- 取出上次歷史記憶 ---
                             last_price = cell.get("last_price", p_num)
                             last_vol = cell.get("last_vol", vol_raw)
                             last_vol_delta = cell.get("last_vol_delta", 0)
@@ -509,20 +504,20 @@ def scanner_engine():
                             
                             curr_vol_delta = vol_raw - last_vol 
                             
-                            # ★ 新增計算：瞬間漲幅與連漲次數
+                            # ★ 修改 1：修正連漲計算，跌了就重置記憶
                             if p_num > last_price:
                                 up_ticks += 1
                                 tick_jump_pct = ((p_num - last_price) / last_price) * 100
                             elif p_num < last_price:
                                 up_ticks = 0
                                 tick_jump_pct = 0
+                                cell["last_grind_tick"] = 0 # 跌了就重置連漲提醒
                             else:
                                 tick_jump_pct = 0
 
                             is_price_dropping = p_num < last_price
                             is_vol_shrinking = (0 <= curr_vol_delta < last_vol_delta) and (curr_vol_delta < a * 0.005)
 
-                            # --- 6. 回落與量縮緩跌警報 ---
                             if drop_p < -2.0 and cell["last_act"] != f"drop_{drop_p:.0f}":
                                 c_wash.append(item)
                                 cell["last_act"] = f"drop_{drop_p:.0f}"
@@ -532,21 +527,25 @@ def scanner_engine():
                                 c_wash.append(item_fade)
                                 cell["last_act"] = "fade"
 
-                            # --- 2. 突破今日新高 (加入保底機制) ---
                             if is_hod_break and (rvol > 0.2 or vol_raw > 50000):
                                 c_hod.append(item)
                                 cell["last_act"] = "hod"
 
-                            # --- ★ 修改 4：短線動能追蹤 (整合急噴與連漲邏輯) ---
-                            is_velocity_spike = tick_jump_pct >= 2.0  # 瞬間拉抬 >= 2%
-                            is_steady_grind = up_ticks >= 3           # 連續 3 次往上墊高
+                            # ★ 修改 2：加入爆量偵測，並設定連漲的 3 倍數防洗頻機制
+                            is_velocity_spike = tick_jump_pct >= 2.0
+                            is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
+                            # 爆量條件：5秒內新增量 > 上次的3倍，且超過2萬股，且股價沒跌
+                            is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                             
-                            if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind:
+                            if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind or is_vol_spike:
                                 item_surge = item.copy()
                                 if is_velocity_spike:
                                     item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
+                                elif is_vol_spike:
+                                    item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                                 elif is_steady_grind:
                                     item_surge["Streak"] = f"🔥連漲x{up_ticks}"
+                                    cell["last_grind_tick"] = up_ticks # 記錄已提醒次數
                                 else:
                                     item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                                     
@@ -560,7 +559,6 @@ def scanner_engine():
                             cell["RVOL"] = item["RVOL"]
                             cell["FloatStr"] = float_str
                             
-                            # --- 儲存記憶狀態供下回合比對 ---
                             cell["last_price"] = p_num
                             cell["last_vol"] = vol_raw
                             cell["last_vol_delta"] = curr_vol_delta
