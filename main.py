@@ -33,20 +33,16 @@ HTML_TEMPLATE = """
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         
-        /* ★ ROSS 實戰配色體系 ★ */
-        /* ★ 區塊標題：統一暗藍色白體字 ★ */
+        /* ★ 修改 1：區塊標題統一暗藍色背景 + 純白體字 ★ */
         .title-bar { 
-            background: #0d1f3d; /* 暗藍色背景 */
-            color: #ffffff;      /* 純白字體 */
+            background: #0d1f3d !important; 
+            color: #ffffff !important; 
             padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; 
             display: flex; justify-content: space-between; align-items: center; 
             border-bottom: 1px solid #30363d; 
         }
-        /* 強制將所有區塊的背景色覆蓋為暗藍色 */
-        .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { 
-            background: #0d1f3d !important; 
-            color: #ffffff !important; 
-        }
+        /* 隱藏原本的各色標題背景，統一交由 title-bar 處理 */
+        .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
         
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
@@ -66,9 +62,10 @@ HTML_TEMPLATE = """
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         #zoom-controls button:hover { background: #30363d; }
         
-        /* ★ 修改 1：實戰閃爍動畫 (區分多空顏色) ★ */
+        /* ★ 修改 2：實戰閃爍動畫 (區分多空顏色) ★ */
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } }
+        
         .flash-green { animation: flashGreen 1.5s ease-out; border-left: 2px solid #3fb950; }
         .flash-red { animation: flashRed 1.5s ease-out; border-left: 2px solid #ff7b72; }
 
@@ -147,7 +144,7 @@ HTML_TEMPLATE = """
             const title = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
             title.onmousedown = (e) => {
-                if(e.target.tagName === 'BUTTON') return; 
+                if(e.target.tagName === 'BUTTON') return; // 避免拖動時觸發按鈕
                 let startX = e.clientX, startY = e.clientY;
                 let startTop = win.offsetTop, startLeft = win.offsetLeft;
                 document.onmousemove = (ev) => {
@@ -199,7 +196,7 @@ HTML_TEMPLATE = """
             return false;
         }
 
-        /* ★ 修改 2：加入 flashClass 參數來區分顏色 ★ */
+        /* ★ 修改 3：加入 flashClass 參數，並將交易量設為黃色以提升辨識度 ★ */
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, flashClass="flash-green") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
             cols.forEach(c => html += `<div>${c}</div>`);
@@ -208,7 +205,7 @@ HTML_TEMPLATE = """
             dataArray.forEach(item => {
                 let rowClass = "grid-row";
                 if (checkTodayNews(item.Code, detailsData)) rowClass += " row-news-today";
-                if (showTime && item.Time === detailsData.last_update) rowClass += " " + flashClass; // 套用指定顏色閃爍
+                if (showTime && item.Time === detailsData.last_update) rowClass += " " + flashClass; // 套用指定閃爍顏色
 
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
                 cols.forEach(c => {
@@ -217,7 +214,7 @@ HTML_TEMPLATE = """
                     else if(c === '價格') html += `<div>${item.Price}</div>`;
                     else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
                     else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
-                    else if(c === '交易量') html += `<div>${item.Volume}</div>`;
+                    else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; // ★ 交易量加入亮黃標示
                     else if(c === '浮動股') html += `<div class="${formatFloat(item.FloatStr)}">${item.FloatStr}</div>`;
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`;
                     else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
@@ -251,31 +248,31 @@ HTML_TEMPLATE = """
                     ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 
-                /* ★ 修改 3：對齊 Ross 實戰動態欄位排版，並分別綁定紅綠色閃爍 ★ */
+                /* ★ 修改 4：針對下捲區塊綁定專屬的紅/綠色閃爍 ★ */
                 // 4. HOD Momentum (綠色閃爍)
                 if (!isLivePaused) {
                     document.getElementById('hod-list').innerHTML = buildTable(
                         data.hod, data.details, 
-                        ['時間','代碼','價格','漲幅%','交易量'], '1fr 0.8fr 1fr 1fr 1.2fr', true, 'flash-green'
+                        ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'
                     );
                 }
 
                 // 5. Surging Up (綠色閃爍)
                 document.getElementById('surge-list').innerHTML = buildTable(
                     data.surge, data.details, 
-                    ['時間','代碼','價格','漲幅%','連擊','交易量'], '1fr 0.8fr 1fr 1fr 0.8fr 1.2fr', true, 'flash-green'
+                    ['時間','代碼','價格','連擊','交易量','量比'], '1fr 0.8fr 1fr 0.8fr 1.2fr 0.8fr', true, 'flash-green'
                 );
 
                 // 6. Reversals / Drops (紅色閃爍)
                 document.getElementById('wash-list').innerHTML = buildTable(
                     data.washouts, data.details, 
-                    ['時間','代碼','價格','回落%','交易量'], '1fr 0.8fr 1fr 1fr 1.2fr', true, 'flash-red'
+                    ['時間','代碼','價格','回落%','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red'
                 );
                 
                 // 7. Halts / Extreme (紅色閃爍)
                 document.getElementById('halt-list').innerHTML = buildTable(
                     data.halts, data.details, 
-                    ['時間','代碼','價格','跳空%','交易量'], '1fr 0.8fr 1fr 1fr 1.2fr', true, 'flash-red'
+                    ['時間','代碼','價格','跳空%','交易量','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 1fr', true, 'flash-red'
                 );
 
             } catch(e) {}
@@ -357,7 +354,7 @@ def get_static(ticker):
         return f, a, p
     except: return 1000000, 500000, 1.0
 
-# ★ 修改 4：精準轉換 K 與 M 顯示格式 (百萬級別改為小數點 1 位) ★
+# ★ 修改 5：精準轉換 K 與 M 顯示格式 (百萬級改為小數點1位，視覺更俐落) ★
 def format_vol_km(v_float):
     if v_float >= 1_000_000:
         return f"{v_float/1_000_000:.1f}M"
@@ -440,7 +437,7 @@ def scanner_engine():
                             item = {
                                 "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                                 "Change": tds[3].text.strip(), 
-                                "Volume": formatted_volume,
+                                "Volume": formatted_volume, 
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "Drop": f"{drop_p:.1f}%",
                                 "FloatStr": float_str, "Turnover": turnover_str, 
                                 "Streak": f"x{cell['streak']}", "gap_num": gap_p, "rvol_num": rvol, "f_num": f
