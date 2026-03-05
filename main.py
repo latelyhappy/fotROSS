@@ -22,13 +22,13 @@ stock_cache = {}
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面：全中文與 ROSS 實戰配色 ] ---
+# --- [ 1. 終極 UI 介面：淡色系護眼實戰版 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.1 - 終極視覺版</title>
+    <title>ROSS Sniper V215.2 - 淡色護眼視覺版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -55,16 +55,20 @@ HTML_TEMPLATE = """
         .text-blue { color: #58a6ff; font-weight: bold; }
         .text-gold { color: #f2cc60; font-weight: bold; } 
         .text-orange { color: #ff9900; font-weight: bold; }
+        .text-purple { color: #d500f9; font-weight: bold; }
         
-        /* ★ 新增：單格熱力圖背景 (Cell Backgrounds) ★ */
-        .bg-cell-purple { background: #6e40c9; color: #ffffff !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
-        .bg-cell-yellow { background: #d29922; color: #000000 !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
-        
-        /* ★ 新增：區塊常駐整列背景 (Row Backgrounds) ★ */
-        .row-halted { background-color: rgba(212, 107, 8, 0.25); border-left: 2px solid #d46b08; }
-        .row-halted:hover { background-color: rgba(212, 107, 8, 0.4); }
-        .row-gapper { background-color: rgba(48, 54, 61, 0.5); border-left: 2px solid #58a6ff; }
-        .row-gapper:hover { background-color: rgba(48, 54, 61, 0.8); }
+        /* ★ 新增：淡色系整列背景 (Row Backgrounds) 優先權：熔斷 > 爆量 > 妖股 > 新聞 ★ */
+        .row-halted { background-color: rgba(204, 85, 0, 0.2) !important; border-left: 2px solid #cc5500; }
+        .row-halted:hover { background-color: rgba(204, 85, 0, 0.3) !important; }
+
+        .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; }
+        .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
+
+        .row-micro-float { background-color: rgba(138, 43, 226, 0.15); border-left: 2px solid #8a2be2; }
+        .row-micro-float:hover { background-color: rgba(138, 43, 226, 0.25); }
+
+        .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; }
+        .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
 
         .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; }
         .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
@@ -74,7 +78,7 @@ HTML_TEMPLATE = """
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         #zoom-controls button:hover { background: #30363d; }
         
-        /* 4 色事件閃爍動畫 */
+        /* 4 色事件瞬間閃爍動畫 (會短暫蓋過淡色背景) */
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } }
@@ -204,23 +208,36 @@ HTML_TEMPLATE = """
             return false;
         }
 
-        // ★ 加入 rowType 參數，用來套用常駐整列背景
+        // ★ 核心渲染函數：套用淡色整列背景邏輯
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, baseFlashClass="flash-green", rowType="normal") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
             cols.forEach(c => html += `<div>${c}</div>`);
             html += '</div>';
 
             dataArray.forEach(item => {
+                // 1. 解析股票指標屬性
+                let fVal = parseFloat(item.FloatStr.replace('M','').replace('K',''));
+                let isMicroFloat = (item.FloatStr.includes('K') || (item.FloatStr.includes('M') && fVal <= 5.0));
+                let rVal = parseFloat(item.RVOL.replace('x','').replace('N/A','0'));
+                let isExtremeVol = (rVal >= 5.0);
+                let hasNews = checkTodayNews(item.Code, detailsData);
+
+                // 2. 決定整列的常駐淡色背景 (嚴格優先順序：熔斷 > 爆量 > 妖股 > 新聞)
                 let rowClass = "grid-row";
+                if (rowType === "halt") {
+                    rowClass += " row-halted";
+                } else if (isExtremeVol) {
+                    rowClass += " row-extreme-vol";
+                } else if (isMicroFloat) {
+                    rowClass += " row-micro-float";
+                } else if (hasNews) {
+                    rowClass += " row-news";
+                }
                 
-                // ★ 根據區塊屬性加上整列背景
-                if (rowType === "halt") rowClass += " row-halted";
-                else if (rowType === "gapper") rowClass += " row-gapper";
+                let newsIcon = hasNews ? ' <span title="今日有新聞" style="font-size:9px;">📰</span>' : '';
                 
-                let newsIcon = checkTodayNews(item.Code, detailsData) ? ' <span title="今日有新聞" style="font-size:9px;">📰</span>' : '';
-                
+                // 3. 處理突發事件的瞬間閃爍動畫 (會暫時覆蓋常駐背景)
                 let currentFlash = baseFlashClass;
-                // 熔斷區塊不參與動能閃爍，其餘動態區塊根據指標決定閃爍色
                 if (item.Streak && rowType !== "halt") {
                     if (item.Streak.includes('💥')) currentFlash = "flash-yellow";  
                     else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; 
@@ -228,6 +245,7 @@ HTML_TEMPLATE = """
 
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash; 
 
+                // 4. 生成 HTML
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
                 cols.forEach(c => {
                     if(c === '時間') html += `<div>${item.Time}</div>`;
@@ -237,28 +255,17 @@ HTML_TEMPLATE = """
                     else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
                     else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
                     
-                    // ★ 浮動股 (Float) 熱力圖上色
+                    // 浮動股文字顏色 (取消紫底色塊，改用文字顏色搭配淡色背景)
                     else if(c === '浮動股') {
-                        let fVal = parseFloat(item.FloatStr.replace('M','').replace('K',''));
-                        let isPurple = (item.FloatStr.includes('K') || (item.FloatStr.includes('M') && fVal <= 5.0));
-                        
-                        if (isPurple) {
-                            html += `<div><span class="bg-cell-purple">${item.FloatStr}</span></div>`; // 深紫底色
-                        } else if (item.FloatStr.includes('M') && fVal <= 20.0) {
-                            html += `<div class="text-orange">${item.FloatStr}</div>`; // 橘色字體
-                        } else {
-                            html += `<div class="text-blue">${item.FloatStr}</div>`; // 藍色字體
-                        }
+                        let fClass = "text-blue";
+                        if (isMicroFloat) fClass = "text-purple";
+                        else if (item.FloatStr.includes('M') && fVal <= 20.0) fClass = "text-orange";
+                        html += `<div class="${fClass}">${item.FloatStr}</div>`;
                     }
                     
-                    // ★ 量比 (RVOL) 熱力圖上色
+                    // 量比文字顏色 (取消黃底色塊)
                     else if(c === '量比') {
-                        let rVal = parseFloat(item.RVOL.replace('x','').replace('N/A','0'));
-                        if (rVal >= 5.0) {
-                            html += `<div><span class="bg-cell-yellow">${item.RVOL}</span></div>`; // 淡黃底色
-                        } else {
-                            html += `<div class="text-gold">${item.RVOL}</div>`; // 金色字體
-                        }
+                        html += `<div class="text-gold">${item.RVOL}</div>`; 
                     }
                     
                     else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
@@ -283,38 +290,39 @@ HTML_TEMPLATE = """
                 data.details.last_update = data.last_update;
                 document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
 
-                // ★ 傳入 "gapper" 讓第 1 區塊呈現灰藍色靜態底色
+                // 靜態榜單
                 document.getElementById('gap-list').innerHTML = buildTable(
                     data.gappers, data.details, 
-                    ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr', false, "flash-green", "gapper"
+                    ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 document.getElementById('vol-list').innerHTML = buildTable(
                     data.high_vol, data.details, 
-                    ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr', false, "flash-green", "normal"
+                    ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr'
                 );
                 document.getElementById('ipo-list').innerHTML = buildTable(
                     data.ipos, data.details, 
-                    ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr', false, "flash-green", "normal"
+                    ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 
+                // 動態下捲榜單
                 if (!isLivePaused) {
                     document.getElementById('hod-list').innerHTML = buildTable(
                         data.hod, data.details, 
-                        ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green', "normal"
+                        ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'
                     );
                 }
 
                 document.getElementById('surge-list').innerHTML = buildTable(
                     data.surge, data.details, 
-                    ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "normal"
+                    ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green'
                 );
 
                 document.getElementById('wash-list').innerHTML = buildTable(
                     data.washouts, data.details, 
-                    ['時間','代碼','價格','狀態','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red', "normal"
+                    ['時間','代碼','價格','狀態','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red'
                 );
                 
-                // ★ 傳入 "halt" 讓熔斷區塊呈現淡橘色警戒底色
+                // 熔斷區塊：傳入 "halt" 確保永遠享有最高優先權的橘色底色
                 document.getElementById('halt-list').innerHTML = buildTable(
                     data.halts, data.details, 
                     ['時間','代碼','價格','跳空%','交易量','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 1fr', true, 'flash-yellow', "halt"
@@ -476,7 +484,7 @@ def fetch_official_halts():
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (終極視覺版)...")
+    print("🔥 啟動七星陣列掃描引擎 (淡色護眼版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -525,7 +533,7 @@ def scanner_engine():
                             cell = MASTER_BRAIN["details"].get(sym, {
                                 "HOD": initial_hod, "NewsList": [], "streak": 0, "last_act": "",
                                 "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
-                                "up_ticks": 0, "last_grind_tick": 0
+                                "up_ticks": 0, "last_grind_tick": 0 
                             })
                             
                             is_hod_break = False
@@ -596,7 +604,7 @@ def scanner_engine():
                                     item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                                 elif is_steady_grind:
                                     item_surge["Streak"] = f"🔥連漲x{up_ticks}"
-                                    cell["last_grind_tick"] = up_ticks
+                                    cell["last_grind_tick"] = up_ticks 
                                 else:
                                     item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                                     
