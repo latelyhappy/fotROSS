@@ -34,13 +34,19 @@ HTML_TEMPLATE = """
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         
         /* ★ ROSS 實戰配色體系 ★ */
-        .title-bar { color: white; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
-        .bg-blue { background: #1E3A8A; }          /* 基礎清單 */
-        .bg-green { background: #137333; }         /* 做多動能 */
-        .bg-gold { background: #b06000; }          /* 爆量警示 */
-        .bg-red { background: #a50e0e; }           /* 危險/回落/熔斷 */
-        .bg-purple { background: #5e35b1; }        /* 低流通妖股 */
-        .bg-dark { background: #21262d; }          /* 戰情中心 */
+        /* ★ 區塊標題：統一暗藍色白體字 ★ */
+        .title-bar { 
+            background: #0d1f3d; /* 暗藍色背景 */
+            color: #ffffff;      /* 純白字體 */
+            padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; 
+            display: flex; justify-content: space-between; align-items: center; 
+            border-bottom: 1px solid #30363d; 
+        }
+        /* 強制將所有區塊的背景色覆蓋為暗藍色 */
+        .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { 
+            background: #0d1f3d !important; 
+            color: #ffffff !important; 
+        }
         
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
