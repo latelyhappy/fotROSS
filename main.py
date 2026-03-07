@@ -12,23 +12,23 @@ warnings.filterwarnings('ignore')
 app = Flask(__name__)
 CORS(app)
 
-# ★ 終極 7 區塊數據中樞 
+# ★ 終極 7 區塊數據中樞 (已將 halts 替換為 grinders)
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "ipos": [],       
-    "hod": [], "surge": [], "washouts": [], "halts": [], 
+    "hod": [], "surge": [], "washouts": [], "grinders": [], 
     "details": {}, "last_update": "N/A", "scan_count": 0
 }
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面：淡色系護眼實戰版 ] ---
+# --- [ 1. 終極 UI 介面：淡色系護眼與 HUD 實戰版 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.2 - 淡色護眼視覺版</title>
+    <title>ROSS Sniper V215.3 - 雙刀流與 HUD 升級版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -57,10 +57,7 @@ HTML_TEMPLATE = """
         .text-orange { color: #ff9900; font-weight: bold; }
         .text-purple { color: #d500f9; font-weight: bold; }
         
-        /* ★ 新增：淡色系整列背景 (Row Backgrounds) 優先權：熔斷 > 爆量 > 妖股 > 新聞 ★ */
-        .row-halted { background-color: rgba(204, 85, 0, 0.2) !important; border-left: 2px solid #cc5500; }
-        .row-halted:hover { background-color: rgba(204, 85, 0, 0.3) !important; }
-
+        /* ★ 淡色系整列背景 (Row Backgrounds) ★ */
         .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; }
         .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
 
@@ -69,6 +66,10 @@ HTML_TEMPLATE = """
 
         .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; }
         .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
+        
+        /* ★ 新增：第 5 區塊緩漲股的專屬深灰藍色低調背景 ★ */
+        .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; }
+        .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
 
         .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; }
         .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
@@ -78,7 +79,7 @@ HTML_TEMPLATE = """
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
         #zoom-controls button:hover { background: #30363d; }
         
-        /* 4 色事件瞬間閃爍動畫 (會短暫蓋過淡色背景) */
+        /* 瞬間閃爍動畫 */
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } }
@@ -113,7 +114,9 @@ HTML_TEMPLATE = """
     <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線動能追蹤 (Surging Up)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
 
     <div class="window" id="win-wash" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-red">6. 回落與量縮緩跌 (Reversals / Fades)</div><div class="content" id="wash-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-halt" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-red">5. 極端波動準熔斷 (Extreme / Halts)</div><div class="content" id="halt-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲 (Grinders)</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    
     <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析 (單擊代碼載入)</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
 
     <div id="sys-status">🔄 掃描引擎連線中...</div>
@@ -208,24 +211,22 @@ HTML_TEMPLATE = """
             return false;
         }
 
-        // ★ 核心渲染函數：套用淡色整列背景邏輯
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, baseFlashClass="flash-green", rowType="normal") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
             cols.forEach(c => html += `<div>${c}</div>`);
             html += '</div>';
 
             dataArray.forEach(item => {
-                // 1. 解析股票指標屬性
                 let fVal = parseFloat(item.FloatStr.replace('M','').replace('K',''));
                 let isMicroFloat = (item.FloatStr.includes('K') || (item.FloatStr.includes('M') && fVal <= 5.0));
-                let rVal = parseFloat(item.RVOL.replace('x','').replace('N/A','0'));
+                let rVal = parseFloat((item.RVOL || "0").replace('x','').replace('N/A','0'));
                 let isExtremeVol = (rVal >= 5.0);
                 let hasNews = checkTodayNews(item.Code, detailsData);
 
-                // 2. 決定整列的常駐淡色背景 (嚴格優先順序：熔斷 > 爆量 > 妖股 > 新聞)
                 let rowClass = "grid-row";
-                if (rowType === "halt") {
-                    rowClass += " row-halted";
+                // ★ 新增判斷 rowType="grinder" 以套用緩漲股專屬底色
+                if (rowType === "grinder") {
+                    rowClass += " row-grinder";
                 } else if (isExtremeVol) {
                     rowClass += " row-extreme-vol";
                 } else if (isMicroFloat) {
@@ -236,16 +237,15 @@ HTML_TEMPLATE = """
                 
                 let newsIcon = hasNews ? ' <span title="今日有新聞" style="font-size:9px;">📰</span>' : '';
                 
-                // 3. 處理突發事件的瞬間閃爍動畫 (會暫時覆蓋常駐背景)
                 let currentFlash = baseFlashClass;
-                if (item.Streak && rowType !== "halt") {
+                // 緩漲區塊不需要刺眼閃爍
+                if (item.Streak && rowType !== "grinder") {
                     if (item.Streak.includes('💥')) currentFlash = "flash-yellow";  
                     else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; 
                 }
 
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash; 
 
-                // 4. 生成 HTML
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
                 cols.forEach(c => {
                     if(c === '時間') html += `<div>${item.Time}</div>`;
@@ -255,7 +255,6 @@ HTML_TEMPLATE = """
                     else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
                     else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
                     
-                    // 浮動股文字顏色 (取消紫底色塊，改用文字顏色搭配淡色背景)
                     else if(c === '浮動股') {
                         let fClass = "text-blue";
                         if (isMicroFloat) fClass = "text-purple";
@@ -263,7 +262,6 @@ HTML_TEMPLATE = """
                         html += `<div class="${fClass}">${item.FloatStr}</div>`;
                     }
                     
-                    // 量比文字顏色 (取消黃底色塊)
                     else if(c === '量比') {
                         html += `<div class="text-gold">${item.RVOL}</div>`; 
                     }
@@ -274,6 +272,7 @@ HTML_TEMPLATE = """
                         let txtColor = "text-green";
                         if(item.Streak.includes('💥')) txtColor = "text-gold";
                         else if(item.Streak.includes('🚀')) txtColor = "text-orange";
+                        else if(item.Streak.includes('🐢')) txtColor = "text-blue"; // 緩漲圖示用藍色顯示
                         else if(item.Streak.includes('🔥')) txtColor = "text-blue";
                         html += `<div class="${txtColor}">${item.Streak}</div>`;
                     }
@@ -290,7 +289,6 @@ HTML_TEMPLATE = """
                 data.details.last_update = data.last_update;
                 document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
 
-                // 靜態榜單
                 document.getElementById('gap-list').innerHTML = buildTable(
                     data.gappers, data.details, 
                     ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
@@ -304,7 +302,6 @@ HTML_TEMPLATE = """
                     ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 
-                // 動態下捲榜單
                 if (!isLivePaused) {
                     document.getElementById('hod-list').innerHTML = buildTable(
                         data.hod, data.details, 
@@ -322,10 +319,10 @@ HTML_TEMPLATE = """
                     ['時間','代碼','價格','狀態','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red'
                 );
                 
-                // 熔斷區塊：傳入 "halt" 確保永遠享有最高優先權的橘色底色
-                document.getElementById('halt-list').innerHTML = buildTable(
-                    data.halts, data.details, 
-                    ['時間','代碼','價格','跳空%','交易量','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 1fr', true, 'flash-yellow', "halt"
+                // ★ 修改：渲染第 5 區塊的主力緩漲股，並套用 rowType="grinder"
+                document.getElementById('grind-list').innerHTML = buildTable(
+                    data.grinders, data.details, 
+                    ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder"
                 );
 
             } catch(e) {}
@@ -354,7 +351,9 @@ HTML_TEMPLATE = """
                 });
             } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中...</div>'; }
 
+            // ★ 新增：HUD 抬頭顯示器 (超大代碼與雙擊功能)
             document.getElementById('detail-list').innerHTML = `
+                <div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
                     <div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div>
                     <div class="p-box">量比<div class="p-val">${d.RVOL}</div></div>
@@ -368,7 +367,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 ] ---
+# --- [ 2. 新聞與靜態數據模組 (已刪除 fetch_official_halts) ] ---
 def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
@@ -423,68 +422,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-def fetch_official_halts():
-    global MASTER_BRAIN
-    try:
-        url = "http://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
-        r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-        xml_data = r.text.replace('ndaq:', '') 
-        root = ET.fromstring(xml_data)
-        tz_tw = pytz.timezone('Asia/Taipei')
-        tz_us = pytz.timezone('US/Eastern')
-        now_us = datetime.now(tz_us)
-        today_us_str = now_us.strftime("%m/%d/%Y") 
-        
-        new_halts = []
-        existing_halt_syms = [h["Code"] for h in MASTER_BRAIN["halts"]]
-        
-        for item in root.findall('./channel/item'):
-            halt_date = item.find('HaltDate')
-            if halt_date is None or halt_date.text != today_us_str: continue
-            title = item.find('title')
-            if title is None: continue
-            sym = title.text.replace('Symbol: ', '').strip()
-            if sym in existing_halt_syms: continue
-                
-            halt_time_us = item.find('HaltTime').text 
-            try:
-                dt_us = datetime.strptime(f"{today_us_str} {halt_time_us}", "%m/%d/%Y %H:%M:%S")
-                dt_us = tz_us.localize(dt_us)
-                time_tw_str = dt_us.astimezone(tz_tw).strftime('%H:%M:%S')
-            except: time_tw_str = halt_time_us 
-                
-            f, a, prev = get_static(sym)
-            try:
-                t = yf.Ticker(sym)
-                price = t.info.get('regularMarketPrice', prev)
-                vol = t.info.get('regularMarketVolume', 0)
-                if price is None: price = prev
-                if vol is None: vol = 0
-            except:
-                price = prev; vol = 0
-                
-            gap_p = ((price - prev) / prev * 100) if prev > 0 else 0
-            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-            
-            halt_item = {
-                "Time": time_tw_str, "Code": sym, "Price": f"${price:.2f}",
-                "Change": f"{gap_p:.2f}%", "Volume": format_vol_km(vol), 
-                "RVOL": "N/A", "Gap": f"{gap_p:.2f}%", "Drop": "0.0%",
-                "FloatStr": float_str, "Turnover": "0%", 
-                "Streak": "x1", "gap_num": gap_p, "rvol_num": 0, "f_num": f
-            }
-            new_halts.append(halt_item)
-            
-        if new_halts:
-            new_halts.reverse()
-            MASTER_BRAIN["halts"] = (new_halts + MASTER_BRAIN["halts"])[:1000]
-    except Exception as e: pass 
-
 # --- [ 3. 中央引擎：7 路智能分流 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (淡色護眼版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.3 雙刀流升級版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -510,7 +452,8 @@ def scanner_engine():
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 if table:
-                    t_all, c_hod, c_surge, c_wash = [], [], [], []
+                    # ★ 加入 c_grind 陣列用來存放緩漲股
+                    t_all, c_hod, c_surge, c_wash, c_grind = [], [], [], [], []
                     
                     for tr in table.find_all('tr')[1:100]: 
                         tds = tr.find_all('td')
@@ -533,7 +476,7 @@ def scanner_engine():
                             cell = MASTER_BRAIN["details"].get(sym, {
                                 "HOD": initial_hod, "NewsList": [], "streak": 0, "last_act": "",
                                 "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
-                                "up_ticks": 0, "last_grind_tick": 0 
+                                "up_ticks": 0, "last_grind_tick": 0, "last_long_grind_tick": 0 
                             })
                             
                             is_hod_break = False
@@ -573,6 +516,7 @@ def scanner_engine():
                                 up_ticks = 0
                                 tick_jump_pct = 0
                                 cell["last_grind_tick"] = 0 
+                                cell["last_long_grind_tick"] = 0 
                             else:
                                 tick_jump_pct = 0
 
@@ -596,6 +540,15 @@ def scanner_engine():
                             is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
                             is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                             
+                            # ★ 新增：完美符合實戰盤感的緩漲判斷演算法
+                            is_long_grinder = (
+                                up_ticks >= 6 and 
+                                tick_jump_pct < 3.0 and 
+                                drop_p > -5.0 and 
+                                p_num >= 1.0
+                            )
+                            
+                            # 動能急噴區塊 (Block 4) 的推播邏輯
                             if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind or is_vol_spike:
                                 item_surge = item.copy()
                                 if is_velocity_spike:
@@ -610,6 +563,13 @@ def scanner_engine():
                                     
                                 c_surge.append(item_surge)
                                 cell["last_act"] = "surge"
+                                
+                            # ★ 新增：主力緩漲區塊 (Block 5) 的推播邏輯
+                            if is_long_grinder and cell.get("last_long_grind_tick") != up_ticks:
+                                item_grind = item.copy()
+                                item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
+                                c_grind.append(item_grind)
+                                cell["last_long_grind_tick"] = up_ticks
 
                             if not cell["NewsList"]: 
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
@@ -630,15 +590,17 @@ def scanner_engine():
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                     ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
                     
+                    # ★ 將抓取到的緩漲股存入 MASTER_BRAIN
                     MASTER_BRAIN.update({
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
                         "washouts": (c_wash + MASTER_BRAIN["washouts"])[:1000],
+                        "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
             
-            fetch_official_halts()
+            # 官方熔斷已經移除，將資源還給主程式運算
             time.sleep(random.uniform(5.0, 10.0))
         except: time.sleep(10)
 
