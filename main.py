@@ -76,7 +76,7 @@ HTML_TEMPLATE = """
         
         #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
         #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
-        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; }
+        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; }
         #zoom-controls button:hover { background: #30363d; }
         
         /* 瞬間閃爍動畫 */
@@ -104,6 +104,8 @@ HTML_TEMPLATE = """
         <button onclick="changeZoom(0.1)">🔍 +</button>
         <button onclick="changeZoom(-0.1)">🔍 -</button>
         <button onclick="resetZoom()">🔄 重置</button>
+        <button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button>
+        <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
     </div>
 
     <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜 (Top Gappers)</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
@@ -124,6 +126,37 @@ HTML_TEMPLATE = """
     <script>
         let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0;
         document.body.style.zoom = currentZoom; 
+        
+        // ★ 新增：全域鎖定與運行狀態變數
+        let isWindowLocked = false;
+        let isEngineRunning = true;
+
+        // ★ 新增：鎖定視窗切換函數
+        function toggleGlobalLock() {
+            isWindowLocked = !isWindowLocked;
+            const btn = document.getElementById('lock-btn');
+            if(isWindowLocked) {
+                btn.innerText = '🔒 視窗鎖定';
+                btn.style.background = '#a50e0e'; // 紅色警告色
+            } else {
+                btn.innerText = '🔓 視窗解鎖';
+                btn.style.background = '#21262d'; // 恢復原本深灰色
+            }
+        }
+
+        // ★ 新增：啟動/停止總開關函數
+        function toggleEngineRun() {
+            isEngineRunning = !isEngineRunning;
+            const btn = document.getElementById('engine-btn');
+            if(!isEngineRunning) {
+                btn.innerText = '▶️ 啟動掃描';
+                btn.style.background = '#137333'; // 綠色提示點擊啟動
+                document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停 (畫面凍結)';
+            } else {
+                btn.innerText = '⏹️ 停止掃描';
+                btn.style.background = '#21262d'; // 恢復原本深灰色
+            }
+        }
 
         function saveLayout() {
             const layout = {};
@@ -164,6 +197,7 @@ HTML_TEMPLATE = """
             const title = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
             title.onmousedown = (e) => {
+                if(isWindowLocked) return; // ★ 鎖定判斷：鎖定時無法拖曳
                 if(e.target.tagName === 'BUTTON') return; 
                 let startX = e.clientX, startY = e.clientY;
                 let startTop = win.offsetTop, startLeft = win.offsetLeft;
@@ -176,6 +210,7 @@ HTML_TEMPLATE = """
                 document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
             };
             handle.onmousedown = (e) => {
+                if(isWindowLocked) return; // ★ 鎖定判斷：鎖定時無法縮放
                 let startW = win.offsetWidth, startH = win.offsetHeight;
                 let startX = e.clientX, startY = e.clientY;
                 document.onmousemove = (ev) => {
@@ -224,7 +259,6 @@ HTML_TEMPLATE = """
                 let hasNews = checkTodayNews(item.Code, detailsData);
 
                 let rowClass = "grid-row";
-                // ★ 新增判斷 rowType="grinder" 以套用緩漲股專屬底色
                 if (rowType === "grinder") {
                     rowClass += " row-grinder";
                 } else if (isExtremeVol) {
@@ -238,7 +272,6 @@ HTML_TEMPLATE = """
                 let newsIcon = hasNews ? ' <span title="今日有新聞" style="font-size:9px;">📰</span>' : '';
                 
                 let currentFlash = baseFlashClass;
-                // 緩漲區塊不需要刺眼閃爍
                 if (item.Streak && rowType !== "grinder") {
                     if (item.Streak.includes('💥')) currentFlash = "flash-yellow";  
                     else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; 
@@ -272,7 +305,7 @@ HTML_TEMPLATE = """
                         let txtColor = "text-green";
                         if(item.Streak.includes('💥')) txtColor = "text-gold";
                         else if(item.Streak.includes('🚀')) txtColor = "text-orange";
-                        else if(item.Streak.includes('🐢')) txtColor = "text-blue"; // 緩漲圖示用藍色顯示
+                        else if(item.Streak.includes('🐢')) txtColor = "text-blue";
                         else if(item.Streak.includes('🔥')) txtColor = "text-blue";
                         html += `<div class="${txtColor}">${item.Streak}</div>`;
                     }
@@ -283,6 +316,8 @@ HTML_TEMPLATE = """
         }
 
         async function refresh() {
+            if(!isEngineRunning) return; // ★ 總開關判斷：暫停時直接跳出，凍結畫面
+
             try {
                 const res = await fetch('/data?t=' + Date.now());
                 const data = await res.json();
@@ -319,7 +354,6 @@ HTML_TEMPLATE = """
                     ['時間','代碼','價格','狀態','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red'
                 );
                 
-                // ★ 修改：渲染第 5 區塊的主力緩漲股，並套用 rowType="grinder"
                 document.getElementById('grind-list').innerHTML = buildTable(
                     data.grinders, data.details, 
                     ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder"
@@ -351,7 +385,6 @@ HTML_TEMPLATE = """
                 });
             } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中...</div>'; }
 
-            // ★ 新增：HUD 抬頭顯示器 (超大代碼與雙擊功能)
             document.getElementById('detail-list').innerHTML = `
                 <div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
@@ -367,7 +400,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 (已刪除 fetch_official_halts) ] ---
+# --- [ 2. 新聞與靜態數據模組 ] ---
 def fetch_news_bg(ticker, cell):
     try:
         url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
@@ -452,7 +485,6 @@ def scanner_engine():
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 if table:
-                    # ★ 加入 c_grind 陣列用來存放緩漲股
                     t_all, c_hod, c_surge, c_wash, c_grind = [], [], [], [], []
                     
                     for tr in table.find_all('tr')[1:100]: 
@@ -540,7 +572,6 @@ def scanner_engine():
                             is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
                             is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                             
-                            # ★ 新增：完美符合實戰盤感的緩漲判斷演算法
                             is_long_grinder = (
                                 up_ticks >= 6 and 
                                 tick_jump_pct < 3.0 and 
@@ -548,7 +579,6 @@ def scanner_engine():
                                 p_num >= 1.0
                             )
                             
-                            # 動能急噴區塊 (Block 4) 的推播邏輯
                             if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind or is_vol_spike:
                                 item_surge = item.copy()
                                 if is_velocity_spike:
@@ -564,7 +594,6 @@ def scanner_engine():
                                 c_surge.append(item_surge)
                                 cell["last_act"] = "surge"
                                 
-                            # ★ 新增：主力緩漲區塊 (Block 5) 的推播邏輯
                             if is_long_grinder and cell.get("last_long_grind_tick") != up_ticks:
                                 item_grind = item.copy()
                                 item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
@@ -590,7 +619,6 @@ def scanner_engine():
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                     ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
                     
-                    # ★ 將抓取到的緩漲股存入 MASTER_BRAIN
                     MASTER_BRAIN.update({
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
@@ -600,7 +628,6 @@ def scanner_engine():
                         "last_update": current_time_tw, "scan_count": count
                     })
             
-            # 官方熔斷已經移除，將資源還給主程式運算
             time.sleep(random.uniform(5.0, 10.0))
         except: time.sleep(10)
 
