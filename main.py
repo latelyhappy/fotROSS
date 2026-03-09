@@ -1,9 +1,8 @@
 import os, time, threading, requests, random, warnings, yfinance as yf
 from datetime import datetime, timedelta
 import pytz
-import xml.etree.ElementTree as ET
+import json
 from deep_translator import GoogleTranslator
-from dateutil import parser
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
 from flask_cors import CORS
@@ -12,23 +11,26 @@ warnings.filterwarnings('ignore')
 app = Flask(__name__)
 CORS(app)
 
-# ★ 終極 7 區塊數據中樞 (已將 halts 替換為 grinders)
+# ★ 終極 7 區塊數據中樞 (將 washouts 替換為 news_leaders)
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "ipos": [],       
-    "hod": [], "surge": [], "washouts": [], "grinders": [], 
+    "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
     "details": {}, "last_update": "N/A", "scan_count": 0
 }
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# --- [ 1. 終極 UI 介面：淡色系護眼與 HUD 實戰版 ] ---
+# 🔑 請在這裡貼上您的 Finnhub API Key
+FINNHUB_API_KEY = "請填入您的KEY"
+
+# --- [ 1. 終極 UI 介面：淡色系護眼與情報 HUD 實戰版 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.3 - 雙刀流與 HUD 升級版</title>
+    <title>ROSS Sniper V215.4 - 情報引擎升級版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -49,7 +51,6 @@ HTML_TEMPLATE = """
         .grid-row:hover { background: #161b22; }
         .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; padding-bottom: 5px; }
         
-        /* 基礎文字顏色 */
         .text-green { color: #3fb950; font-weight: bold; } 
         .text-red { color: #ff7b72; font-weight: bold; } 
         .text-blue { color: #58a6ff; font-weight: bold; }
@@ -57,17 +58,15 @@ HTML_TEMPLATE = """
         .text-orange { color: #ff9900; font-weight: bold; }
         .text-purple { color: #d500f9; font-weight: bold; }
         
-        /* ★ 淡色系整列背景 (Row Backgrounds) ★ */
+        .bg-cell-purple { background: #6e40c9; color: #ffffff !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
+        
+        /* 淡色系整列背景 */
         .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; }
         .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
-
         .row-micro-float { background-color: rgba(138, 43, 226, 0.15); border-left: 2px solid #8a2be2; }
         .row-micro-float:hover { background-color: rgba(138, 43, 226, 0.25); }
-
         .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; }
         .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
-        
-        /* ★ 新增：第 5 區塊緩漲股的專屬深灰藍色低調背景 ★ */
         .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; }
         .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
 
@@ -79,24 +78,22 @@ HTML_TEMPLATE = """
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; }
         #zoom-controls button:hover { background: #30363d; }
         
-        /* 瞬間閃爍動畫 */
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
-        @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } }
-        @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } }
         @keyframes flashOrange { 0% { background-color: rgba(255, 123, 0, 0.4); } 100% { background-color: transparent; } }
+        @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } }
         
         .flash-green { animation: flashGreen 1.5s ease-out; border-left: 2px solid #3fb950; }
-        .flash-red { animation: flashRed 1.5s ease-out; border-left: 2px solid #ff7b72; }
-        .flash-yellow { animation: flashYellow 1.5s ease-out; border-left: 2px solid #d29922; }
         .flash-orange { animation: flashOrange 1.5s ease-out; border-left: 2px solid #ff7b00; }
+        .flash-yellow { animation: flashYellow 1.5s ease-out; border-left: 2px solid #d29922; }
 
         .news-header { margin-top:5px; border-bottom:1px solid #30363d; padding-bottom:3px; font-size: 12px; color: #fff; }
         .news-item-container { border-left: 2px solid #8b949e; padding-left: 6px; margin-bottom: 8px; line-height: 1.3; }
-        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; }
-        .news-title-link { font-size: 12px; font-weight: bold; color: #c9d1d9; text-decoration: none; display: inline-block; }
-        .news-title-link:hover { color: #58a6ff; text-decoration: underline; }
-        
-        .pause-btn { background: #f85149; border: 1px solid #fff; color: white; border-radius: 3px; cursor: pointer; padding: 2px 6px; font-size: 10px; font-weight: bold; margin-left: 10px;}
+        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; color:#8b949e;}
+        .news-title-link { font-size: 12px; font-weight: bold; text-decoration: none; display: inline-block; transition: color 0.2s; }
+        .news-title-link:hover { text-decoration: underline; }
+        .score-tag-high { background:#6e40c9; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .score-tag-pos { background:#238636; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .score-tag-neg { background:#da3633; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
     </style>
 </head>
 <body>
@@ -112,13 +109,12 @@ HTML_TEMPLATE = """
     <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲 (High Volume)</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-ipo" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 極低流通與新股 (Low Float / IPOs)</div><div class="content" id="ipo-list"></div><div class="resize-handle"></div></div>
 
-    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 (HOD Momentum) <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 (HOD Momentum)</div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線動能追蹤 (Surging Up)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
 
-    <div class="window" id="win-wash" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-red">6. 回落與量縮緩跌 (Reversals / Fades)</div><div class="content" id="wash-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜 (Top Catalysts)</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
     
     <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲 (Grinders)</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
-    
     <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析 (單擊代碼載入)</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
 
     <div id="sys-status">🔄 掃描引擎連線中...</div>
@@ -127,35 +123,44 @@ HTML_TEMPLATE = """
         let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0;
         document.body.style.zoom = currentZoom; 
         
-        // ★ 新增：全域鎖定與運行狀態變數
         let isWindowLocked = false;
         let isEngineRunning = true;
 
-        // ★ 新增：鎖定視窗切換函數
+        // ★ 新增：讀取已讀與標星紀錄
+        let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}');
+        let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
+
+        window.markRead = function(id, url) {
+            readNewsMap[id] = true;
+            localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap));
+            let linkEl = document.getElementById('news-link-' + id);
+            if(linkEl) linkEl.style.color = '#6e7681'; // 變暗灰色
+            if(url !== '#') window.open(url, '_blank');
+        };
+
+        window.toggleStar = function(id, event) {
+            event.stopPropagation();
+            if(starNewsMap[id]) delete starNewsMap[id];
+            else starNewsMap[id] = true;
+            localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap));
+            let starEl = document.getElementById('star-icon-' + id);
+            if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆';
+        };
+
         function toggleGlobalLock() {
             isWindowLocked = !isWindowLocked;
             const btn = document.getElementById('lock-btn');
-            if(isWindowLocked) {
-                btn.innerText = '🔒 視窗鎖定';
-                btn.style.background = '#a50e0e'; // 紅色警告色
-            } else {
-                btn.innerText = '🔓 視窗解鎖';
-                btn.style.background = '#21262d'; // 恢復原本深灰色
-            }
+            if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } 
+            else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; }
         }
 
-        // ★ 新增：啟動/停止總開關函數
         function toggleEngineRun() {
             isEngineRunning = !isEngineRunning;
             const btn = document.getElementById('engine-btn');
             if(!isEngineRunning) {
-                btn.innerText = '▶️ 啟動掃描';
-                btn.style.background = '#137333'; // 綠色提示點擊啟動
-                document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停 (畫面凍結)';
-            } else {
-                btn.innerText = '⏹️ 停止掃描';
-                btn.style.background = '#21262d'; // 恢復原本深灰色
-            }
+                btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333';
+                document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停';
+            } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; }
         }
 
         function saveLayout() {
@@ -173,11 +178,8 @@ HTML_TEMPLATE = """
         }
 
         function resetZoom() {
-            currentZoom = 1.0;
-            document.body.style.zoom = currentZoom;
-            localStorage.removeItem('ross_zoom');
-            localStorage.removeItem('ross_layout');
-            location.reload(); 
+            currentZoom = 1.0; document.body.style.zoom = currentZoom;
+            localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); 
         }
 
         window.addEventListener('DOMContentLoaded', () => {
@@ -197,54 +199,28 @@ HTML_TEMPLATE = """
             const title = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
             title.onmousedown = (e) => {
-                if(isWindowLocked) return; // ★ 鎖定判斷：鎖定時無法拖曳
-                if(e.target.tagName === 'BUTTON') return; 
+                if(isWindowLocked || e.target.tagName === 'BUTTON') return; 
                 let startX = e.clientX, startY = e.clientY;
                 let startTop = win.offsetTop, startLeft = win.offsetLeft;
                 document.onmousemove = (ev) => {
-                    let dx = (ev.clientX - startX) / currentZoom;
-                    let dy = (ev.clientY - startY) / currentZoom;
-                    win.style.top = (startTop + dy) + "px";
-                    win.style.left = (startLeft + dx) + "px";
+                    win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px";
+                    win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px";
                 };
                 document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
             };
             handle.onmousedown = (e) => {
-                if(isWindowLocked) return; // ★ 鎖定判斷：鎖定時無法縮放
+                if(isWindowLocked) return; 
                 let startW = win.offsetWidth, startH = win.offsetHeight;
                 let startX = e.clientX, startY = e.clientY;
                 document.onmousemove = (ev) => {
-                    let dx = (ev.clientX - startX) / currentZoom;
-                    let dy = (ev.clientY - startY) / currentZoom;
-                    win.style.width = (startW + dx) + 'px';
-                    win.style.height = (startH + dy) + 'px';
+                    win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px';
+                    win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px';
                 };
                 document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
             };
         });
 
-        let isLivePaused = false;
-        function togglePause(e) {
-            e.stopPropagation();
-            isLivePaused = !isLivePaused;
-            const btn = document.getElementById('pause-btn');
-            if(isLivePaused) {
-                btn.innerText = '▶️ 恢復滾動';
-                btn.style.background = '#137333';
-            } else {
-                btn.innerText = '⏸️ 暫停滾動';
-                btn.style.background = '#a50e0e';
-            }
-        }
-
         function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
-
-        function checkTodayNews(sym, detailsData) {
-            if(detailsData[sym] && detailsData[sym].NewsList) {
-                return detailsData[sym].NewsList.some(n => n.category === 'today');
-            }
-            return false;
-        }
 
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, baseFlashClass="flash-green", rowType="normal") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
@@ -252,31 +228,28 @@ HTML_TEMPLATE = """
             html += '</div>';
 
             dataArray.forEach(item => {
-                let fVal = parseFloat(item.FloatStr.replace('M','').replace('K',''));
+                let fVal = parseFloat((item.FloatStr||"0").replace('M','').replace('K',''));
                 let isMicroFloat = (item.FloatStr.includes('K') || (item.FloatStr.includes('M') && fVal <= 5.0));
                 let rVal = parseFloat((item.RVOL || "0").replace('x','').replace('N/A','0'));
                 let isExtremeVol = (rVal >= 5.0);
-                let hasNews = checkTodayNews(item.Code, detailsData);
+                
+                // 確認是否有分數 > 0 的新聞
+                let hasNews = false;
+                if(detailsData[item.Code] && detailsData[item.Code].max_news_score > 0) hasNews = true;
 
                 let rowClass = "grid-row";
-                if (rowType === "grinder") {
-                    rowClass += " row-grinder";
-                } else if (isExtremeVol) {
-                    rowClass += " row-extreme-vol";
-                } else if (isMicroFloat) {
-                    rowClass += " row-micro-float";
-                } else if (hasNews) {
-                    rowClass += " row-news";
-                }
+                if (rowType === "grinder") rowClass += " row-grinder";
+                else if (isExtremeVol) rowClass += " row-extreme-vol";
+                else if (isMicroFloat) rowClass += " row-micro-float";
+                else if (hasNews) rowClass += " row-news";
                 
-                let newsIcon = hasNews ? ' <span title="今日有新聞" style="font-size:9px;">📰</span>' : '';
+                let newsIcon = hasNews ? ' <span title="強勢催化劑" style="font-size:9px;">🔥</span>' : '';
                 
                 let currentFlash = baseFlashClass;
                 if (item.Streak && rowType !== "grinder") {
                     if (item.Streak.includes('💥')) currentFlash = "flash-yellow";  
                     else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; 
                 }
-
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash; 
 
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
@@ -287,26 +260,21 @@ HTML_TEMPLATE = """
                     else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
                     else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
                     else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
-                    
                     else if(c === '浮動股') {
-                        let fClass = "text-blue";
-                        if (isMicroFloat) fClass = "text-purple";
-                        else if (item.FloatStr.includes('M') && fVal <= 20.0) fClass = "text-orange";
+                        let fClass = isMicroFloat ? "text-purple" : (item.FloatStr.includes('M') && fVal <= 20.0 ? "text-orange" : "text-blue");
                         html += `<div class="${fClass}">${item.FloatStr}</div>`;
                     }
-                    
-                    else if(c === '量比') {
-                        html += `<div class="text-gold">${item.RVOL}</div>`; 
+                    else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
+                    // ★ 專屬新聞評分欄位渲染
+                    else if(c === '評分') {
+                        let score = item.NewsScore || 0;
+                        if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`;
+                        else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`;
+                        else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`;
+                        else html += `<div><span class="text-blue">-</span></div>`;
                     }
-                    
-                    else if(c === '回落%') html += `<div class="text-red">${item.Drop}</div>`;
-                    else if(c === '狀態') html += `<div class="text-red">${item.Drop}</div>`; 
                     else if(c === '動能指標') {
-                        let txtColor = "text-green";
-                        if(item.Streak.includes('💥')) txtColor = "text-gold";
-                        else if(item.Streak.includes('🚀')) txtColor = "text-orange";
-                        else if(item.Streak.includes('🐢')) txtColor = "text-blue";
-                        else if(item.Streak.includes('🔥')) txtColor = "text-blue";
+                        let txtColor = item.Streak.includes('💥') ? "text-gold" : (item.Streak.includes('🚀') ? "text-orange" : "text-blue");
                         html += `<div class="${txtColor}">${item.Streak}</div>`;
                     }
                 });
@@ -316,8 +284,7 @@ HTML_TEMPLATE = """
         }
 
         async function refresh() {
-            if(!isEngineRunning) return; // ★ 總開關判斷：暫停時直接跳出，凍結畫面
-
+            if(!isEngineRunning) return; 
             try {
                 const res = await fetch('/data?t=' + Date.now());
                 const data = await res.json();
@@ -337,23 +304,22 @@ HTML_TEMPLATE = """
                     ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
                 );
                 
-                if (!isLivePaused) {
-                    document.getElementById('hod-list').innerHTML = buildTable(
-                        data.hod, data.details, 
-                        ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'
-                    );
-                }
+                document.getElementById('hod-list').innerHTML = buildTable(
+                    data.hod, data.details, 
+                    ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'
+                );
 
                 document.getElementById('surge-list').innerHTML = buildTable(
                     data.surge, data.details, 
                     ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green'
                 );
-
-                document.getElementById('wash-list').innerHTML = buildTable(
-                    data.washouts, data.details, 
-                    ['時間','代碼','價格','狀態','交易量','量比'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr', true, 'flash-red'
-                );
                 
+                // ★ 第 6 區塊：渲染新聞評分榜 (僅看價格過濾，依照分數排列)
+                document.getElementById('news-score-list').innerHTML = buildTable(
+                    data.news_leaders, data.details, 
+                    ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr'
+                );
+
                 document.getElementById('grind-list').innerHTML = buildTable(
                     data.grinders, data.details, 
                     ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder"
@@ -368,22 +334,33 @@ HTML_TEMPLATE = """
             const d = data.details[sym];
             if(!d) return;
 
-            let newsHTML = '<h3 class="news-header">📰 48H 催化劑情報 (台灣時間)</h3>';
+            let newsHTML = '<h3 class="news-header">📰 Finnhub 催化劑解析與評分</h3>';
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
                     if(n.link === '#') {
                         newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`;
                     } else {
-                        let borderColor = n.category === "today" ? "#d500f9" : (n.category === "yesterday" ? "#58a6ff" : "#8b949e");
-                        let dateTag = n.category === "today" ? "🔥 本日" : (n.category === "yesterday" ? "📆 昨日" : "📅");
+                        // ★ 已讀與打星的 UI 渲染邏輯
+                        let isRead = readNewsMap[n.id];
+                        let isStarred = starNewsMap[n.id];
+                        let titleColor = isRead ? '#6e7681' : '#c9d1d9';
+                        let starSymbol = isStarred ? '⭐' : '☆';
+                        
+                        let scoreTag = '';
+                        if(n.score >= 10) scoreTag = `<span class="score-tag-high">🔥 +${n.score}</span>`;
+                        else if(n.score > 0) scoreTag = `<span class="score-tag-pos">🔥 +${n.score}</span>`;
+                        else if(n.score < 0) scoreTag = `<span class="score-tag-neg">☠️ ${n.score}</span>`;
+
                         newsHTML += `
-                        <div class="news-item-container" style="border-left-color: ${borderColor};">
-                            <span class="news-date-tag" style="color:${borderColor};">${dateTag} ${n.time}</span><br>
-                            <a href="${n.link}" target="_blank" class="news-title-link">${n.title}</a>
+                        <div class="news-item-container">
+                            <span class="news-date-tag">${n.time}</span>
+                            <span id="star-icon-${n.id}" style="cursor:pointer; float:right; color:#f2cc60;" onclick="toggleStar('${n.id}', event)">${starSymbol}</span>
+                            <br>
+                            ${scoreTag}<a id="news-link-${n.id}" href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor};">${n.title}</a>
                         </div>`;
                     }
                 });
-            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中...</div>'; }
+            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中或無資料...</div>'; }
 
             document.getElementById('detail-list').innerHTML = `
                 <div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div>
@@ -400,32 +377,70 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 新聞與靜態數據模組 ] ---
+# --- [ 2. 核心情報引擎：Finnhub 對接與 NLP 打分系統 ] ---
+def calculate_news_score(headline):
+    headline_lower = headline.lower()
+    score = 0
+    # ★ 自定義量化打分字典
+    strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent']
+    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement']
+    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy']
+    
+    for word in strong_bull:
+        if word in headline_lower: score += 10
+    for word in bull:
+        if word in headline_lower: score += 5
+    for word in bear:
+        if word in headline_lower: score -= 10
+    return score
+
 def fetch_news_bg(ticker, cell):
     try:
-        url = f"https://news.google.com/rss/search?q={ticker}+stock+when:2d&hl=en-US&gl=US&ceid=US:en"
-        r = requests.get(url, headers=STEALTH_HEADERS, timeout=5)
-        root = ET.fromstring(r.content)
-        tz_tw = pytz.timezone('Asia/Taipei')
-        now_tw = datetime.now(tz_tw)
+        if FINNHUB_API_KEY == "請填入您的KEY" or not FINNHUB_API_KEY:
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ 請填寫 Finnhub API Key 以啟用極速新聞", "score": 0, "link": "#", "time": "", "category": "none"}]
+            cell["max_news_score"] = 0
+            return
+
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date}&to={end_date}&token={FINNHUB_API_KEY}"
+        
+        r = requests.get(url, timeout=5)
+        data = r.json()
+        
         news = []
-        for item in root.findall('./channel/item')[:3]: 
-            title_en = item.find('title').text.rsplit(" - ", 1)[0]
-            pub_dt_tw = parser.parse(item.find('pubDate').text).astimezone(tz_tw)
-            
-            if pub_dt_tw.date() == now_tw.date(): cat = "today"
-            elif pub_dt_tw.date() == (now_tw.date() - timedelta(days=1)): cat = "yesterday"
-            else: cat = "older"
+        max_score = 0
+        
+        if data and isinstance(data, list):
+            for item in data[:4]: # 抓取最新 4 則
+                headline_en = item.get('headline', '')
+                if not headline_en: continue
                 
-            news.append({
-                'title': translator.translate(title_en),
-                'link': item.find('link').text,
-                'time': pub_dt_tw.strftime('%m/%d %H:%M'),
-                'category': cat
-            })
-        cell["NewsList"] = news if news else [{"title": "無重大新聞", "link": "#", "time": "", "category": "none"}]
-    except:
-        cell["NewsList"] = [{"title": "新聞連線異常", "link": "#", "time": "", "category": "none"}]
+                # NLP 英文關鍵字打分
+                score = calculate_news_score(headline_en)
+                if score > max_score: max_score = score
+                elif score < 0 and max_score == 0: max_score = score # 如果沒利多，保留毒藥分數
+                
+                # 轉譯為繁體中文
+                try: title_zh = translator.translate(headline_en)
+                except: title_zh = headline_en
+                    
+                news_time = datetime.fromtimestamp(item.get('datetime', 0), pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
+                news_id = str(item.get('id', random.randint(1000, 999999)))
+                
+                news.append({
+                    'id': news_id, 'title': title_zh, 'score': score,
+                    'link': item.get('url', '#'), 'time': news_time
+                })
+        
+        if not news:
+            news = [{"id": "0", "title": "48H 內無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+            
+        cell["NewsList"] = news
+        cell["max_news_score"] = max_score
+    except Exception as e:
+        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常，請確認 API 額度", "score": 0, "link": "#", "time": ""}]
+        cell["max_news_score"] = 0
 
 def get_static(ticker):
     if ticker in stock_cache: return stock_cache[ticker]
@@ -440,12 +455,9 @@ def get_static(ticker):
     except: return 1000000, 500000, 1.0
 
 def format_vol_km(v_float):
-    if v_float >= 1_000_000:
-        return f"{v_float/1_000_000:.1f}M"
-    elif v_float >= 1_000:
-        return f"{v_float/1_000:.1f}K"
-    else:
-        return f"{int(v_float)}"
+    if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
+    elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
+    else: return f"{int(v_float)}"
 
 def parse_vol(v_str):
     v_str = v_str.upper().replace(',', '').strip()
@@ -455,11 +467,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# --- [ 3. 中央引擎：7 路智能分流 ] ---
+# --- [ 3. 中央引擎：雙刀流與情報排行榜 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.3 雙刀流升級版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.4 情報評分榜升級版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -485,7 +497,7 @@ def scanner_engine():
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 if table:
-                    t_all, c_hod, c_surge, c_wash, c_grind = [], [], [], [], []
+                    t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
                     for tr in table.find_all('tr')[1:100]: 
                         tds = tr.find_all('td')
@@ -495,6 +507,7 @@ def scanner_engine():
                         try: p_num = float(tds[4].text.replace('$','').replace(',',''))
                         except: continue
                         
+                        # ★ 篩選器設定：只看價格介於 0.5 到 50 的標的
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
                             
@@ -506,7 +519,7 @@ def scanner_engine():
                             initial_hod = (p_num * 0.98) if is_new_stock else p_num
                             
                             cell = MASTER_BRAIN["details"].get(sym, {
-                                "HOD": initial_hod, "NewsList": [], "streak": 0, "last_act": "",
+                                "HOD": initial_hod, "NewsList": [], "max_news_score": 0, "streak": 0, "last_act": "",
                                 "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
                                 "up_ticks": 0, "last_grind_tick": 0, "last_long_grind_tick": 0 
                             })
@@ -522,23 +535,24 @@ def scanner_engine():
                             drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
                             
                             float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                            turnover_str = f"{(vol_raw/f*100):.1f}%" if f > 0 else "0%"
                             
                             item = {
                                 "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                                "Change": tds[3].text.strip(), 
-                                "Volume": formatted_volume, 
+                                "Change": tds[3].text.strip(), "Volume": formatted_volume, 
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "Drop": f"{drop_p:.1f}%",
-                                "FloatStr": float_str, "Turnover": turnover_str, 
-                                "Streak": f"x{cell['streak']}", "gap_num": gap_p, "rvol_num": rvol, "f_num": f
+                                "FloatStr": float_str, "Streak": f"x{cell['streak']}", 
+                                "gap_num": gap_p, "rvol_num": rvol, "f_num": f
                             }
                             t_all.append(item)
+                            
+                            # 儲存當前輪次的最新狀態，供新聞榜單使用
+                            cell["latest_item"] = item
+                            cell["last_seen"] = current_time_tw
 
                             last_price = cell.get("last_price", p_num)
                             last_vol = cell.get("last_vol", vol_raw)
                             last_vol_delta = cell.get("last_vol_delta", 0)
                             up_ticks = cell.get("up_ticks", 0) 
-                            
                             curr_vol_delta = vol_raw - last_vol 
                             
                             if p_num > last_price:
@@ -549,20 +563,7 @@ def scanner_engine():
                                 tick_jump_pct = 0
                                 cell["last_grind_tick"] = 0 
                                 cell["last_long_grind_tick"] = 0 
-                            else:
-                                tick_jump_pct = 0
-
-                            is_price_dropping = p_num < last_price
-                            is_vol_shrinking = (0 <= curr_vol_delta < last_vol_delta) and (curr_vol_delta < a * 0.005)
-
-                            if drop_p < -2.0 and cell["last_act"] != f"drop_{drop_p:.0f}":
-                                c_wash.append(item)
-                                cell["last_act"] = f"drop_{drop_p:.0f}"
-                            elif is_price_dropping and is_vol_shrinking and cell["last_act"] != "fade":
-                                item_fade = item.copy()
-                                item_fade["Drop"] = "量縮跌" 
-                                c_wash.append(item_fade)
-                                cell["last_act"] = "fade"
+                            else: tick_jump_pct = 0
 
                             if is_hod_break and (rvol > 0.2 or vol_raw > 50000):
                                 c_hod.append(item)
@@ -571,28 +572,17 @@ def scanner_engine():
                             is_velocity_spike = tick_jump_pct >= 2.0
                             is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
                             is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
-                            
-                            is_long_grinder = (
-                                up_ticks >= 6 and 
-                                tick_jump_pct < 3.0 and 
-                                drop_p > -5.0 and 
-                                p_num >= 1.0
-                            )
+                            is_long_grinder = (up_ticks >= 6 and tick_jump_pct < 3.0 and drop_p > -5.0 and p_num >= 1.0)
                             
                             if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind or is_vol_spike:
                                 item_surge = item.copy()
-                                if is_velocity_spike:
-                                    item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
-                                elif is_vol_spike:
-                                    item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
+                                if is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
+                                elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                                 elif is_steady_grind:
                                     item_surge["Streak"] = f"🔥連漲x{up_ticks}"
                                     cell["last_grind_tick"] = up_ticks 
-                                else:
-                                    item_surge["Streak"] = f"⭐破高x{cell['streak']}"
-                                    
+                                else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                                 c_surge.append(item_surge)
-                                cell["last_act"] = "surge"
                                 
                             if is_long_grinder and cell.get("last_long_grind_tick") != up_ticks:
                                 item_grind = item.copy()
@@ -600,13 +590,11 @@ def scanner_engine():
                                 c_grind.append(item_grind)
                                 cell["last_long_grind_tick"] = up_ticks
 
+                            # 觸發背景去 Finnhub 索取新聞 (只有尚未抓取過的才會執行)
                             if not cell["NewsList"]: 
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
                             cell["HOD_str"] = f"${cell['HOD']:.2f}"
-                            cell["RVOL"] = item["RVOL"]
-                            cell["FloatStr"] = float_str
-                            
                             cell["last_price"] = p_num
                             cell["last_vol"] = vol_raw
                             cell["last_vol_delta"] = curr_vol_delta
@@ -614,6 +602,19 @@ def scanner_engine():
                             MASTER_BRAIN["details"][sym] = cell
 
                     count += 1
+                    
+                    # ★ 產生第 6 區塊專用的「新聞評分榜」
+                    # 邏輯：從字典中找出本輪(last_seen)存在、且新聞分數大於 0 的股票，依照分數排序
+                    news_list_temp = []
+                    for sym, cell in MASTER_BRAIN["details"].items():
+                        score = cell.get("max_news_score", 0)
+                        # 如果股票在當前這 5 秒的活躍榜單上，且有正面分數
+                        if score != 0 and "latest_item" in cell and cell.get("last_seen") == current_time_tw:
+                            i_copy = cell["latest_item"].copy()
+                            i_copy["NewsScore"] = score
+                            news_list_temp.append(i_copy)
+                            
+                    news_leaders = sorted(news_list_temp, key=lambda x: x["NewsScore"], reverse=True)[:20]
                     
                     gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
@@ -623,7 +624,7 @@ def scanner_engine():
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
-                        "washouts": (c_wash + MASTER_BRAIN["washouts"])[:1000],
+                        "news_leaders": news_leaders, # ★ 更新新聞榜
                         "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
