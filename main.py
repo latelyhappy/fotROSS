@@ -1,7 +1,8 @@
-import os, time, threading, requests, random, warnings, yfinance as yf
+import os, time, threading, requests, random, warnings, yfinance as yf, traceback
 from datetime import datetime, timedelta
 import pytz
 import json
+import xml.etree.ElementTree as ET
 from deep_translator import GoogleTranslator
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
@@ -11,7 +12,6 @@ warnings.filterwarnings('ignore')
 app = Flask(__name__)
 CORS(app)
 
-# ★ 終極 7 區塊數據中樞 (將 washouts 替換為 news_leaders)
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "ipos": [],       
     "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
@@ -19,12 +19,19 @@ MASTER_BRAIN = {
 }
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
-STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
-# 🔑 請在這裡貼上您的 Finnhub API Key
+# ★ 升級防阻擋偽裝 (Bypass Cloudflare)
+STEALTH_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
+}
+
 FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
 
-# --- [ 1. 終極 UI 介面：淡色系護眼與情報 HUD 實戰版 ] ---
+# --- [ 1. 終極 UI 介面 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -34,357 +41,142 @@ HTML_TEMPLATE = """
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
-        
-        .title-bar { 
-            background: #0d1f3d !important; 
-            color: #ffffff !important; 
-            padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; 
-            display: flex; justify-content: space-between; align-items: center; 
-            border-bottom: 1px solid #30363d; 
-        }
+        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
         .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
-        
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
-        
         .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 5px 0; cursor: pointer; transition: background 0.1s; }
         .grid-row:hover { background: #161b22; }
         .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; padding-bottom: 5px; }
-        
-        .text-green { color: #3fb950; font-weight: bold; } 
-        .text-red { color: #ff7b72; font-weight: bold; } 
-        .text-blue { color: #58a6ff; font-weight: bold; }
-        .text-gold { color: #f2cc60; font-weight: bold; } 
-        .text-orange { color: #ff9900; font-weight: bold; }
-        .text-purple { color: #d500f9; font-weight: bold; }
-        
-        .bg-cell-purple { background: #6e40c9; color: #ffffff !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
-        
-        /* 淡色系整列背景 */
-        .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; }
-        .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
-        .row-micro-float { background-color: rgba(138, 43, 226, 0.15); border-left: 2px solid #8a2be2; }
-        .row-micro-float:hover { background-color: rgba(138, 43, 226, 0.25); }
-        .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; }
-        .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
-        .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; }
-        .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
-
-        .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; }
-        .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
-        
-        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
-        #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
-        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; }
-        #zoom-controls button:hover { background: #30363d; }
-        
-        @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } }
-        @keyframes flashOrange { 0% { background-color: rgba(255, 123, 0, 0.4); } 100% { background-color: transparent; } }
-        @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } }
-        
-        .flash-green { animation: flashGreen 1.5s ease-out; border-left: 2px solid #3fb950; }
-        .flash-orange { animation: flashOrange 1.5s ease-out; border-left: 2px solid #ff7b00; }
-        .flash-yellow { animation: flashYellow 1.5s ease-out; border-left: 2px solid #d29922; }
-
-        .news-header { margin-top:5px; border-bottom:1px solid #30363d; padding-bottom:3px; font-size: 12px; color: #fff; }
-        .news-item-container { border-left: 2px solid #8b949e; padding-left: 6px; margin-bottom: 8px; line-height: 1.3; }
-        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; color:#8b949e;}
-        .news-title-link { font-size: 12px; font-weight: bold; text-decoration: none; display: inline-block; transition: color 0.2s; }
-        .news-title-link:hover { text-decoration: underline; }
+        .text-green { color: #3fb950; font-weight: bold; } .text-red { color: #ff7b72; font-weight: bold; } .text-blue { color: #58a6ff; font-weight: bold; }
+        .text-gold { color: #f2cc60; font-weight: bold; } .text-orange { color: #ff9900; font-weight: bold; } .text-purple { color: #d500f9; font-weight: bold; }
         .score-tag-high { background:#6e40c9; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
         .score-tag-pos { background:#238636; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
         .score-tag-neg { background:#da3633; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .bg-cell-purple { background: #6e40c9; color: #ffffff !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
+        .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; } .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
+        .row-micro-float { background-color: rgba(138, 43, 226, 0.15); border-left: 2px solid #8a2be2; } .row-micro-float:hover { background-color: rgba(138, 43, 226, 0.25); }
+        .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; } .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
+        .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; } .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
+        .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; } .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
+        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
+        #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
+        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; } #zoom-controls button:hover { background: #30363d; }
+        @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } } @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } } @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } } @keyframes flashOrange { 0% { background-color: rgba(255, 123, 0, 0.4); } 100% { background-color: transparent; } }
+        .flash-green { animation: flashGreen 1.5s ease-out; border-left: 2px solid #3fb950; } .flash-red { animation: flashRed 1.5s ease-out; border-left: 2px solid #ff7b72; } .flash-yellow { animation: flashYellow 1.5s ease-out; border-left: 2px solid #d29922; } .flash-orange { animation: flashOrange 1.5s ease-out; border-left: 2px solid #ff7b00; }
+        .news-header { margin-top:5px; border-bottom:1px solid #30363d; padding-bottom:3px; font-size: 12px; color: #fff; }
+        .news-item-container { border-left: 2px solid #8b949e; padding-left: 6px; margin-bottom: 8px; line-height: 1.3; }
+        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; color:#8b949e;}
+        .news-title-link { font-size: 12px; font-weight: bold; color: #c9d1d9; text-decoration: none; display: inline-block; transition: color 0.2s;} .news-title-link:hover { color: #58a6ff; text-decoration: underline; }
+        .pause-btn { background: #f85149; border: 1px solid #fff; color: white; border-radius: 3px; cursor: pointer; padding: 2px 6px; font-size: 10px; font-weight: bold; margin-left: 10px;}
     </style>
 </head>
 <body>
-    <div id="zoom-controls">
-        <button onclick="changeZoom(0.1)">🔍 +</button>
-        <button onclick="changeZoom(-0.1)">🔍 -</button>
-        <button onclick="resetZoom()">🔄 重置</button>
-        <button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button>
-        <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
-    </div>
-
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜 (Top Gappers)</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲 (High Volume)</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-ipo" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 極低流通與新股 (Low Float / IPOs)</div><div class="content" id="ipo-list"></div><div class="resize-handle"></div></div>
-
-    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 (HOD Momentum)</div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線動能追蹤 (Surging Up)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-
-    <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜 (Top Catalysts)</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
-    
-    <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲 (Grinders)</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析 (單擊代碼載入)</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
-
+    <div id="zoom-controls"><button onclick="changeZoom(0.1)">🔍 +</button><button onclick="changeZoom(-0.1)">🔍 -</button><button onclick="resetZoom()">🔄 重置</button><button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button><button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button></div>
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-ipo" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 極低流通與新股</div><div class="content" id="ipo-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線動能追蹤</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
     <script>
-        let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0;
-        document.body.style.zoom = currentZoom; 
-        
-        let isWindowLocked = false;
-        let isEngineRunning = true;
+        let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0; document.body.style.zoom = currentZoom; 
+        let isWindowLocked = false; let isEngineRunning = true;
+        let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
-        // ★ 新增：讀取已讀與標星紀錄
-        let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}');
-        let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
+        window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
+        window.toggleStar = function(id, event) { event.stopPropagation(); if(starNewsMap[id]) delete starNewsMap[id]; else starNewsMap[id] = true; localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap)); let starEl = document.getElementById('star-icon-' + id); if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆'; };
+        function toggleGlobalLock() { isWindowLocked = !isWindowLocked; const btn = document.getElementById('lock-btn'); if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; } }
+        function toggleEngineRun() { isEngineRunning = !isEngineRunning; const btn = document.getElementById('engine-btn'); if(!isEngineRunning) { btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停'; } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; } }
+        function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('ross_layout', JSON.stringify(layout)); }
+        function changeZoom(delta) { currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta)); document.body.style.zoom = currentZoom; localStorage.setItem('ross_zoom', currentZoom); }
+        function resetZoom() { currentZoom = 1.0; document.body.style.zoom = currentZoom; localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); }
 
-        window.markRead = function(id, url) {
-            readNewsMap[id] = true;
-            localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap));
-            let linkEl = document.getElementById('news-link-' + id);
-            if(linkEl) linkEl.style.color = '#6e7681'; // 變暗灰色
-            if(url !== '#') window.open(url, '_blank');
-        };
+        window.addEventListener('DOMContentLoaded', () => { const saved = JSON.parse(localStorage.getItem('ross_layout')); if(saved) { for(const id in saved) { const win = document.getElementById(id); if(win && saved[id]) { win.style.top = saved[id].top; win.style.left = saved[id].left; win.style.width = saved[id].width; win.style.height = saved[id].height; } } } });
+        document.querySelectorAll('.window').forEach(win => { const title = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle'); title.onmousedown = (e) => { if(isWindowLocked || e.target.tagName === 'BUTTON') return; let startX = e.clientX, startY = e.clientY; let startTop = win.offsetTop, startLeft = win.offsetLeft; document.onmousemove = (ev) => { win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px"; win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px"; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; handle.onmousedown = (e) => { if(isWindowLocked) return; let startW = win.offsetWidth, startH = win.offsetHeight; let startX = e.clientX, startY = e.clientY; document.onmousemove = (ev) => { win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px'; win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px'; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; });
 
-        window.toggleStar = function(id, event) {
-            event.stopPropagation();
-            if(starNewsMap[id]) delete starNewsMap[id];
-            else starNewsMap[id] = true;
-            localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap));
-            let starEl = document.getElementById('star-icon-' + id);
-            if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆';
-        };
-
-        function toggleGlobalLock() {
-            isWindowLocked = !isWindowLocked;
-            const btn = document.getElementById('lock-btn');
-            if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } 
-            else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; }
-        }
-
-        function toggleEngineRun() {
-            isEngineRunning = !isEngineRunning;
-            const btn = document.getElementById('engine-btn');
-            if(!isEngineRunning) {
-                btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333';
-                document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停';
-            } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; }
-        }
-
-        function saveLayout() {
-            const layout = {};
-            document.querySelectorAll('.window').forEach(win => {
-                layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height };
-            });
-            localStorage.setItem('ross_layout', JSON.stringify(layout));
-        }
-
-        function changeZoom(delta) {
-            currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta));
-            document.body.style.zoom = currentZoom;
-            localStorage.setItem('ross_zoom', currentZoom);
-        }
-
-        function resetZoom() {
-            currentZoom = 1.0; document.body.style.zoom = currentZoom;
-            localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); 
-        }
-
-        window.addEventListener('DOMContentLoaded', () => {
-            const saved = JSON.parse(localStorage.getItem('ross_layout'));
-            if(saved) {
-                for(const id in saved) {
-                    const win = document.getElementById(id);
-                    if(win && saved[id]) {
-                        win.style.top = saved[id].top; win.style.left = saved[id].left;
-                        win.style.width = saved[id].width; win.style.height = saved[id].height;
-                    }
-                }
-            }
-        });
-
-        document.querySelectorAll('.window').forEach(win => {
-            const title = win.querySelector('.title-bar');
-            const handle = win.querySelector('.resize-handle');
-            title.onmousedown = (e) => {
-                if(isWindowLocked || e.target.tagName === 'BUTTON') return; 
-                let startX = e.clientX, startY = e.clientY;
-                let startTop = win.offsetTop, startLeft = win.offsetLeft;
-                document.onmousemove = (ev) => {
-                    win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px";
-                    win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px";
-                };
-                document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
-            };
-            handle.onmousedown = (e) => {
-                if(isWindowLocked) return; 
-                let startW = win.offsetWidth, startH = win.offsetHeight;
-                let startX = e.clientX, startY = e.clientY;
-                document.onmousemove = (ev) => {
-                    win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px';
-                    win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px';
-                };
-                document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); };
-            };
-        });
-
+        let isLivePaused = false;
+        function togglePause(e) { e.stopPropagation(); isLivePaused = !isLivePaused; const btn = document.getElementById('pause-btn'); if(isLivePaused) { btn.innerText = '▶️ 恢復滾動'; btn.style.background = '#137333'; } else { btn.innerText = '⏸️ 暫停滾動'; btn.style.background = '#a50e0e'; } }
         function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
 
         function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, baseFlashClass="flash-green", rowType="normal") {
             let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
-            cols.forEach(c => html += `<div>${c}</div>`);
-            html += '</div>';
-
+            cols.forEach(c => html += `<div>${c}</div>`); html += '</div>';
             dataArray.forEach(item => {
-                let fVal = parseFloat((item.FloatStr||"0").replace('M','').replace('K',''));
-                let isMicroFloat = (item.FloatStr.includes('K') || (item.FloatStr.includes('M') && fVal <= 5.0));
+                let fVal = parseFloat((item.FloatStr || "0").replace('M','').replace('K',''));
+                let isMicroFloat = ((item.FloatStr || "").includes('K') || ((item.FloatStr || "").includes('M') && fVal <= 5.0));
                 let rVal = parseFloat((item.RVOL || "0").replace('x','').replace('N/A','0'));
                 let isExtremeVol = (rVal >= 5.0);
-                
-                // 確認是否有分數 > 0 的新聞
-                let hasNews = false;
-                if(detailsData[item.Code] && detailsData[item.Code].max_news_score > 0) hasNews = true;
+                let hasNews = false, isNewsRead = false;
+                let dNews = detailsData[item.Code] ? detailsData[item.Code].NewsList : [];
+                if(dNews && dNews.length > 0 && dNews[0].id && dNews[0].id !== "0") { hasNews = true; isNewsRead = dNews.some(n => readNewsMap[n.id]); }
 
                 let rowClass = "grid-row";
-                if (rowType === "grinder") rowClass += " row-grinder";
-                else if (isExtremeVol) rowClass += " row-extreme-vol";
-                else if (isMicroFloat) rowClass += " row-micro-float";
-                else if (hasNews) rowClass += " row-news";
+                if (rowType === "grinder") rowClass += " row-grinder"; else if (isExtremeVol) rowClass += " row-extreme-vol"; else if (isMicroFloat) rowClass += " row-micro-float"; else if (hasNews) rowClass += " row-news";
+                let newsIcon = ''; if(hasNews) { newsIcon = isNewsRead ? ' <span title="新聞已讀" style="font-size:10px; opacity:0.6;">📰✔️</span>' : ' <span title="今日有新聞" style="font-size:10px;">📰</span>'; }
+                let currentFlash = baseFlashClass; if (item.Streak && rowType !== "grinder") { if (item.Streak.includes('💥')) currentFlash = "flash-yellow"; else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; }
+                if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash;
                 
-                let newsIcon = hasNews ? ' <span title="強勢催化劑" style="font-size:9px;">🔥</span>' : '';
-                
-                let currentFlash = baseFlashClass;
-                if (item.Streak && rowType !== "grinder") {
-                    if (item.Streak.includes('💥')) currentFlash = "flash-yellow";  
-                    else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; 
-                }
-                if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash; 
-
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
                 cols.forEach(c => {
-                    if(c === '時間') html += `<div>${item.Time}</div>`;
-                    else if(c === '代碼') html += `<div class="text-blue">${item.Code}${newsIcon}</div>`;
-                    else if(c === '價格') html += `<div>${item.Price}</div>`;
-                    else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
-                    else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`;
-                    else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
-                    else if(c === '浮動股') {
-                        let fClass = isMicroFloat ? "text-purple" : (item.FloatStr.includes('M') && fVal <= 20.0 ? "text-orange" : "text-blue");
-                        html += `<div class="${fClass}">${item.FloatStr}</div>`;
-                    }
+                    if(c === '時間') html += `<div>${item.Time}</div>`; else if(c === '代碼') html += `<div class="text-blue">${item.Code}${newsIcon}</div>`;
+                    else if(c === '價格') html += `<div>${item.Price}</div>`; else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
+                    else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`; else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
+                    else if(c === '浮動股') { let fClass = "text-blue"; if (isMicroFloat) fClass = "text-purple"; else if ((item.FloatStr || "").includes('M') && fVal <= 20.0) fClass = "text-orange"; html += `<div class="${fClass}">${item.FloatStr}</div>`; }
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
-                    // ★ 專屬新聞評分欄位渲染
-                    else if(c === '評分') {
-                        let score = item.NewsScore || 0;
-                        if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`;
-                        else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`;
-                        else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`;
-                        else html += `<div><span class="text-blue">-</span></div>`;
-                    }
-                    else if(c === '動能指標') {
-                        let txtColor = item.Streak.includes('💥') ? "text-gold" : (item.Streak.includes('🚀') ? "text-orange" : "text-blue");
-                        html += `<div class="${txtColor}">${item.Streak}</div>`;
-                    }
-                });
-                html += '</div>';
-            });
-            return html;
+                    else if(c === '評分') { let score = item.NewsScore || 0; if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`; else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`; else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`; else html += `<div><span class="text-blue">-</span></div>`; }
+                    else if(c === '動能指標') { let txtColor = "text-green"; if (item.Streak) { if(item.Streak.includes('💥')) txtColor = "text-gold"; else if(item.Streak.includes('🚀')) txtColor = "text-orange"; else if(item.Streak.includes('🐢') || item.Streak.includes('🔥')) txtColor = "text-blue"; } html += `<div class="${txtColor}">${item.Streak || ""}</div>`; }
+                }); html += '</div>';
+            }); return html;
         }
 
         async function refresh() {
             if(!isEngineRunning) return; 
             try {
-                const res = await fetch('/data?t=' + Date.now());
-                const data = await res.json();
-                data.details.last_update = data.last_update;
+                const res = await fetch('/data?t=' + Date.now()); const data = await res.json(); data.details.last_update = data.last_update;
                 document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
-
-                document.getElementById('gap-list').innerHTML = buildTable(
-                    data.gappers, data.details, 
-                    ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
-                );
-                document.getElementById('vol-list').innerHTML = buildTable(
-                    data.high_vol, data.details, 
-                    ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr'
-                );
-                document.getElementById('ipo-list').innerHTML = buildTable(
-                    data.ipos, data.details, 
-                    ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr'
-                );
-                
-                document.getElementById('hod-list').innerHTML = buildTable(
-                    data.hod, data.details, 
-                    ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'
-                );
-
-                document.getElementById('surge-list').innerHTML = buildTable(
-                    data.surge, data.details, 
-                    ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green'
-                );
-                
-                // ★ 第 6 區塊：渲染新聞評分榜 (僅看價格過濾，依照分數排列)
-                document.getElementById('news-score-list').innerHTML = buildTable(
-                    data.news_leaders, data.details, 
-                    ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr'
-                );
-
-                document.getElementById('grind-list').innerHTML = buildTable(
-                    data.grinders, data.details, 
-                    ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder"
-                );
-
+                document.getElementById('gap-list').innerHTML = buildTable(data.gappers, data.details, ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
+                document.getElementById('vol-list').innerHTML = buildTable(data.high_vol, data.details, ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr');
+                document.getElementById('ipo-list').innerHTML = buildTable(data.ipos, data.details, ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
+                if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
+                document.getElementById('surge-list').innerHTML = buildTable(data.surge, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green');
+                document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
+                document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
             } catch(e) {}
         }
 
         async function loadDetail(sym) {
-            const res = await fetch('/data?t=' + Date.now());
-            const data = await res.json();
-            const d = data.details[sym];
-            if(!d) return;
-
-            let newsHTML = '<h3 class="news-header">📰 Finnhub 催化劑解析與評分</h3>';
+            const res = await fetch('/data?t=' + Date.now()); const data = await res.json(); const d = data.details[sym]; if(!d) return;
+            let newsHTML = '<h3 class="news-header">📰 今日 Finnhub 催化劑解析與評分</h3>';
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
-                    if(n.link === '#') {
-                        newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`;
-                    } else {
-                        // ★ 已讀與打星的 UI 渲染邏輯
-                        let isRead = readNewsMap[n.id];
-                        let isStarred = starNewsMap[n.id];
-                        let titleColor = isRead ? '#6e7681' : '#c9d1d9';
-                        let starSymbol = isStarred ? '⭐' : '☆';
-                        
-                        let scoreTag = '';
-                        if(n.score >= 10) scoreTag = `<span class="score-tag-high">🔥 +${n.score}</span>`;
-                        else if(n.score > 0) scoreTag = `<span class="score-tag-pos">🔥 +${n.score}</span>`;
-                        else if(n.score < 0) scoreTag = `<span class="score-tag-neg">☠️ ${n.score}</span>`;
-
-                        newsHTML += `
-                        <div class="news-item-container">
-                            <span class="news-date-tag">${n.time}</span>
-                            <span id="star-icon-${n.id}" style="cursor:pointer; float:right; color:#f2cc60;" onclick="toggleStar('${n.id}', event)">${starSymbol}</span>
-                            <br>
-                            ${scoreTag}<a id="news-link-${n.id}" href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor};">${n.title}</a>
-                        </div>`;
+                    if(n.link === '#') { newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`; } 
+                    else {
+                        let isRead = readNewsMap[n.id]; let isStarred = starNewsMap[n.id]; let titleColor = isRead ? '#6e7681' : '#c9d1d9'; let starSymbol = isStarred ? '⭐' : '☆';
+                        let scoreTag = ''; if(n.score >= 10) scoreTag = `<span class="score-tag-high">🔥 +${n.score}</span>`; else if(n.score > 0) scoreTag = `<span class="score-tag-pos">🔥 +${n.score}</span>`; else if(n.score < 0) scoreTag = `<span class="score-tag-neg">☠️ ${n.score}</span>`;
+                        newsHTML += `<div class="news-item-container"><span class="news-date-tag">${n.time}</span><span id="star-icon-${n.id}" style="cursor:pointer; float:right; color:#f2cc60;" onclick="toggleStar('${n.id}', event)">${starSymbol}</span><br>${scoreTag}<a id="news-link-${n.id}" href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor};">${n.title}</a></div>`;
                     }
                 });
-            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中或無資料...</div>'; }
-
-            document.getElementById('detail-list').innerHTML = `
-                <div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
-                    <div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div>
-                    <div class="p-box">量比<div class="p-val">${d.RVOL}</div></div>
-                    <div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div>
-                </div>${newsHTML}`;
+            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
+            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
-
         setInterval(refresh, 2000);
     </script>
 </body>
 </html>
 """
 
-# --- [ 2. 核心情報引擎：Finnhub 對接與 NLP 打分系統 ] ---
+# --- [ 2. 核心情報引擎 ] ---
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
-    # ★ 自定義量化打分字典
-    strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent']
-    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement']
-    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy']
+    strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent', 'breakthrough', 'fast track', 'orphan', 'pivotal']
+    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive']
+    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default']
     
     for word in strong_bull:
         if word in headline_lower: score += 10
@@ -401,10 +193,11 @@ def fetch_news_bg(ticker, cell):
             cell["max_news_score"] = 0
             return
 
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date}&to={end_date}&token={FINNHUB_API_KEY}"
+        tz_us = pytz.timezone('US/Eastern')
+        now_us = datetime.now(tz_us)
+        target_date = now_us.strftime('%Y-%m-%d')
         
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={target_date}&to={target_date}&token={FINNHUB_API_KEY}"
         r = requests.get(url, timeout=5)
         data = r.json()
         
@@ -412,34 +205,27 @@ def fetch_news_bg(ticker, cell):
         max_score = 0
         
         if data and isinstance(data, list):
-            for item in data[:4]: # 抓取最新 4 則
+            for item in data[:4]: 
                 headline_en = item.get('headline', '')
                 if not headline_en: continue
                 
-                # NLP 英文關鍵字打分
                 score = calculate_news_score(headline_en)
                 if score > max_score: max_score = score
-                elif score < 0 and max_score == 0: max_score = score # 如果沒利多，保留毒藥分數
+                elif score < 0 and max_score == 0: max_score = score 
                 
-                # 轉譯為繁體中文
                 try: title_zh = translator.translate(headline_en)
                 except: title_zh = headline_en
                     
-                news_time = datetime.fromtimestamp(item.get('datetime', 0), pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
+                news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
                 news_id = str(item.get('id', random.randint(1000, 999999)))
                 
-                news.append({
-                    'id': news_id, 'title': title_zh, 'score': score,
-                    'link': item.get('url', '#'), 'time': news_time
-                })
+                news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
         
-        if not news:
-            news = [{"id": "0", "title": "48H 內無重大公關新聞", "score": 0, "link": "#", "time": ""}]
-            
+        if not news: news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
     except Exception as e:
-        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常，請確認 API 額度", "score": 0, "link": "#", "time": ""}]
+        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
 
 def get_static(ticker):
@@ -467,11 +253,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# --- [ 3. 中央引擎：雙刀流與情報排行榜 ] ---
+# --- [ 3. 中央引擎：開啟 Debug 除錯模式 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.4 情報評分榜升級版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.4 終極除錯版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -488,14 +274,24 @@ def scanner_engine():
             else:
                 url = "https://stockanalysis.com/markets/after-hours/"
 
+            # 打印當前正在連線的網址與時間，方便除錯
+            print(f"[{current_time_tw}] 正在請求資料: {url}")
+            
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+            print(f"[{current_time_tw}] 伺服器回傳狀態碼: {r.status_code}") # 如果這裡是 403，就是被阻擋了
+            
             if r.status_code == 404:
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
                 r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+                print(f"[{current_time_tw}] 重新請求 404 網址，狀態碼: {r.status_code}")
             
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
+                
+                if not table:
+                    print(f"[{current_time_tw}] ⚠️ 警告：連線成功但找不到表格！網站結構可能已改變。")
+                
                 if table:
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
@@ -507,7 +303,6 @@ def scanner_engine():
                         try: p_num = float(tds[4].text.replace('$','').replace(',',''))
                         except: continue
                         
-                        # ★ 篩選器設定：只看價格介於 0.5 到 50 的標的
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
                             
@@ -545,7 +340,6 @@ def scanner_engine():
                             }
                             t_all.append(item)
                             
-                            # 儲存當前輪次的最新狀態，供新聞榜單使用
                             cell["latest_item"] = item
                             cell["last_seen"] = current_time_tw
 
@@ -590,8 +384,9 @@ def scanner_engine():
                                 c_grind.append(item_grind)
                                 cell["last_long_grind_tick"] = up_ticks
 
-                            # 觸發背景去 Finnhub 索取新聞 (只有尚未抓取過的才會執行)
+                            # ★ 防呆：設定為檢索中，防止同一檔股票重複開啟無數個執行緒
                             if not cell["NewsList"]: 
+                                cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
                             cell["HOD_str"] = f"${cell['HOD']:.2f}"
@@ -603,19 +398,16 @@ def scanner_engine():
 
                     count += 1
                     
-                    # ★ 產生第 6 區塊專用的「新聞評分榜」
-                    # 邏輯：從字典中找出本輪(last_seen)存在、且新聞分數大於 0 的股票，依照分數排序
                     news_list_temp = []
-                    for sym, cell in MASTER_BRAIN["details"].items():
-                        score = cell.get("max_news_score", 0)
-                        # 如果股票在當前這 5 秒的活躍榜單上，且有正面分數
-                        if score != 0 and "latest_item" in cell and cell.get("last_seen") == current_time_tw:
-                            i_copy = cell["latest_item"].copy()
+                    for k_sym, k_cell in MASTER_BRAIN["details"].items():
+                        score = k_cell.get("max_news_score", 0)
+                        if score != 0 and "latest_item" in k_cell and k_cell.get("last_seen") == current_time_tw:
+                            i_copy = k_cell["latest_item"].copy()
                             i_copy["NewsScore"] = score
                             news_list_temp.append(i_copy)
                             
                     news_leaders = sorted(news_list_temp, key=lambda x: x["NewsScore"], reverse=True)[:20]
-                    
+
                     gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                     ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
@@ -624,13 +416,20 @@ def scanner_engine():
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
-                        "news_leaders": news_leaders, # ★ 更新新聞榜
+                        "news_leaders": news_leaders, 
                         "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
+            else:
+                print(f"[{current_time_tw}] ❌ 取得資料失敗，伺服器可能正在阻擋我們的連線。")
             
             time.sleep(random.uniform(5.0, 10.0))
-        except: time.sleep(10)
+            
+        except Exception as e:
+            # ★ 終極除錯：如果有任何 Python 程式碼寫錯，這裡會整排印出紅色錯誤代碼！
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生嚴重錯誤：")
+            traceback.print_exc()
+            time.sleep(10)
 
 @app.route('/data')
 def get_data(): return jsonify(MASTER_BRAIN)
