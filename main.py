@@ -22,7 +22,7 @@ translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
 # 🔑 請在這裡貼上您的 Finnhub API Key
-FINNHUB_API_KEY = "請填入您的KEY"
+FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
 
 # --- [ 1. 終極 UI 介面：情報 HUD 與已讀圖標版 ] ---
 HTML_TEMPLATE = """
