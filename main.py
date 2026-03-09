@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 app = Flask(__name__)
 CORS(app)
 
-# ★ 終極 7 區塊數據中樞 (將 washouts 替換為 news_leaders)
+# ★ 終極 7 區塊數據中樞
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "ipos": [],       
     "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
@@ -22,9 +22,9 @@ translator = GoogleTranslator(source='auto', target='zh-TW')
 STEALTH_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'}
 
 # 🔑 請在這裡貼上您的 Finnhub API Key
-FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
+FINNHUB_API_KEY = "請填入您的KEY"
 
-# --- [ 1. 終極 UI 介面：淡色系護眼與情報 HUD 實戰版 ] ---
+# --- [ 1. 終極 UI 介面：情報 HUD 與已讀圖標版 ] ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -126,16 +126,17 @@ HTML_TEMPLATE = """
         let isWindowLocked = false;
         let isEngineRunning = true;
 
-        // ★ 新增：讀取已讀與標星紀錄
         let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}');
         let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
+        // ★ 新讀取邏輯：標記已讀後會重新整理頁面資料，更新代碼旁的已讀圖標
         window.markRead = function(id, url) {
             readNewsMap[id] = true;
             localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap));
             let linkEl = document.getElementById('news-link-' + id);
-            if(linkEl) linkEl.style.color = '#6e7681'; // 變暗灰色
+            if(linkEl) linkEl.style.color = '#6e7681'; 
             if(url !== '#') window.open(url, '_blank');
+            refresh(); // 強制刷新圖表更新圖標
         };
 
         window.toggleStar = function(id, event) {
@@ -233,9 +234,15 @@ HTML_TEMPLATE = """
                 let rVal = parseFloat((item.RVOL || "0").replace('x','').replace('N/A','0'));
                 let isExtremeVol = (rVal >= 5.0);
                 
-                // 確認是否有分數 > 0 的新聞
+                // ★ 新聞判定與已讀狀態檢查
                 let hasNews = false;
-                if(detailsData[item.Code] && detailsData[item.Code].max_news_score > 0) hasNews = true;
+                let isNewsRead = false;
+                let dNews = detailsData[item.Code] ? detailsData[item.Code].NewsList : [];
+                if(dNews && dNews.length > 0 && dNews[0].id !== "0") {
+                    hasNews = true;
+                    // 若有任何一篇新聞被標記已讀，則視為已讀狀態
+                    isNewsRead = dNews.some(n => readNewsMap[n.id]);
+                }
 
                 let rowClass = "grid-row";
                 if (rowType === "grinder") rowClass += " row-grinder";
@@ -243,7 +250,12 @@ HTML_TEMPLATE = """
                 else if (isMicroFloat) rowClass += " row-micro-float";
                 else if (hasNews) rowClass += " row-news";
                 
-                let newsIcon = hasNews ? ' <span title="強勢催化劑" style="font-size:9px;">🔥</span>' : '';
+                // ★ 根據已讀狀態渲染代碼旁的圖標
+                let newsIcon = '';
+                if(hasNews) {
+                    if(isNewsRead) newsIcon = ' <span title="新聞已讀" style="font-size:10px; opacity:0.6;">📰✔️</span>';
+                    else newsIcon = ' <span title="今日有新聞" style="font-size:10px;">📰</span>';
+                }
                 
                 let currentFlash = baseFlashClass;
                 if (item.Streak && rowType !== "grinder") {
@@ -265,7 +277,6 @@ HTML_TEMPLATE = """
                         html += `<div class="${fClass}">${item.FloatStr}</div>`;
                     }
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
-                    // ★ 專屬新聞評分欄位渲染
                     else if(c === '評分') {
                         let score = item.NewsScore || 0;
                         if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`;
@@ -314,7 +325,6 @@ HTML_TEMPLATE = """
                     ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green'
                 );
                 
-                // ★ 第 6 區塊：渲染新聞評分榜 (僅看價格過濾，依照分數排列)
                 document.getElementById('news-score-list').innerHTML = buildTable(
                     data.news_leaders, data.details, 
                     ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr'
@@ -334,13 +344,12 @@ HTML_TEMPLATE = """
             const d = data.details[sym];
             if(!d) return;
 
-            let newsHTML = '<h3 class="news-header">📰 Finnhub 催化劑解析與評分</h3>';
+            let newsHTML = '<h3 class="news-header">📰 今日 Finnhub 催化劑解析與評分</h3>';
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
                     if(n.link === '#') {
                         newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`;
                     } else {
-                        // ★ 已讀與打星的 UI 渲染邏輯
                         let isRead = readNewsMap[n.id];
                         let isStarred = starNewsMap[n.id];
                         let titleColor = isRead ? '#6e7681' : '#c9d1d9';
@@ -360,7 +369,7 @@ HTML_TEMPLATE = """
                         </div>`;
                     }
                 });
-            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">檢索中或無資料...</div>'; }
+            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
 
             document.getElementById('detail-list').innerHTML = `
                 <div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div>
@@ -377,14 +386,14 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 核心情報引擎：Finnhub 對接與 NLP 打分系統 ] ---
+# --- [ 2. 核心情報引擎：Finnhub 對接與進化版 NLP 字典 ] ---
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
-    # ★ 自定義量化打分字典
-    strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent']
-    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement']
-    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy']
+    # ★ 大幅擴充的量化打分字典
+    strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent', 'breakthrough', 'fast track', 'orphan', 'pivotal']
+    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive']
+    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default']
     
     for word in strong_bull:
         if word in headline_lower: score += 10
@@ -401,9 +410,12 @@ def fetch_news_bg(ticker, cell):
             cell["max_news_score"] = 0
             return
 
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date}&to={end_date}&token={FINNHUB_API_KEY}"
+        # ★ 強制使用美東時間 (US/Eastern) 鎖定「今日」
+        tz_us = pytz.timezone('US/Eastern')
+        now_us = datetime.now(tz_us)
+        target_date = now_us.strftime('%Y-%m-%d')
+        
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={target_date}&to={target_date}&token={FINNHUB_API_KEY}"
         
         r = requests.get(url, timeout=5)
         data = r.json()
@@ -412,16 +424,14 @@ def fetch_news_bg(ticker, cell):
         max_score = 0
         
         if data and isinstance(data, list):
-            for item in data[:4]: # 抓取最新 4 則
+            for item in data[:4]: 
                 headline_en = item.get('headline', '')
                 if not headline_en: continue
                 
-                # NLP 英文關鍵字打分
                 score = calculate_news_score(headline_en)
                 if score > max_score: max_score = score
-                elif score < 0 and max_score == 0: max_score = score # 如果沒利多，保留毒藥分數
+                elif score < 0 and max_score == 0: max_score = score 
                 
-                # 轉譯為繁體中文
                 try: title_zh = translator.translate(headline_en)
                 except: title_zh = headline_en
                     
@@ -434,7 +444,7 @@ def fetch_news_bg(ticker, cell):
                 })
         
         if not news:
-            news = [{"id": "0", "title": "48H 內無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+            news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
             
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
@@ -507,7 +517,6 @@ def scanner_engine():
                         try: p_num = float(tds[4].text.replace('$','').replace(',',''))
                         except: continue
                         
-                        # ★ 篩選器設定：只看價格介於 0.5 到 50 的標的
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
                             
@@ -545,7 +554,6 @@ def scanner_engine():
                             }
                             t_all.append(item)
                             
-                            # 儲存當前輪次的最新狀態，供新聞榜單使用
                             cell["latest_item"] = item
                             cell["last_seen"] = current_time_tw
 
@@ -590,7 +598,6 @@ def scanner_engine():
                                 c_grind.append(item_grind)
                                 cell["last_long_grind_tick"] = up_ticks
 
-                            # 觸發背景去 Finnhub 索取新聞 (只有尚未抓取過的才會執行)
                             if not cell["NewsList"]: 
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
@@ -603,12 +610,9 @@ def scanner_engine():
 
                     count += 1
                     
-                    # ★ 產生第 6 區塊專用的「新聞評分榜」
-                    # 邏輯：從字典中找出本輪(last_seen)存在、且新聞分數大於 0 的股票，依照分數排序
                     news_list_temp = []
                     for sym, cell in MASTER_BRAIN["details"].items():
                         score = cell.get("max_news_score", 0)
-                        # 如果股票在當前這 5 秒的活躍榜單上，且有正面分數
                         if score != 0 and "latest_item" in cell and cell.get("last_seen") == current_time_tw:
                             i_copy = cell["latest_item"].copy()
                             i_copy["NewsScore"] = score
@@ -624,7 +628,7 @@ def scanner_engine():
                         "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
-                        "news_leaders": news_leaders, # ★ 更新新聞榜
+                        "news_leaders": news_leaders,
                         "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
