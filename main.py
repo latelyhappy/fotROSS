@@ -2,7 +2,6 @@ import os, time, threading, requests, random, warnings, yfinance as yf, tracebac
 from datetime import datetime, timedelta
 import pytz
 import json
-import xml.etree.ElementTree as ET
 from deep_translator import GoogleTranslator
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
@@ -20,7 +19,6 @@ MASTER_BRAIN = {
 stock_cache = {} 
 translator = GoogleTranslator(source='auto', target='zh-TW')
 
-# ★ 升級防阻擋偽裝 (Bypass Cloudflare)
 STEALTH_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -29,6 +27,7 @@ STEALTH_HEADERS = {
     'Upgrade-Insecure-Requests': '1'
 }
 
+# 🔑 請在這裡貼上您的 Finnhub API Key
 FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
 
 # --- [ 1. 終極 UI 介面 ] ---
@@ -37,7 +36,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.4 - 情報引擎升級版</title>
+    <title>ROSS Sniper V215.4.1 - X光除錯版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -189,7 +188,7 @@ def calculate_news_score(headline):
 def fetch_news_bg(ticker, cell):
     try:
         if FINNHUB_API_KEY == "請填入您的KEY" or not FINNHUB_API_KEY:
-            cell["NewsList"] = [{"id": "0", "title": "⚠️ 請填寫 Finnhub API Key 以啟用極速新聞", "score": 0, "link": "#", "time": "", "category": "none"}]
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ 請填寫 Finnhub API Key", "score": 0, "link": "#", "time": "", "category": "none"}]
             cell["max_news_score"] = 0
             return
 
@@ -203,12 +202,10 @@ def fetch_news_bg(ticker, cell):
         
         news = []
         max_score = 0
-        
         if data and isinstance(data, list):
             for item in data[:4]: 
                 headline_en = item.get('headline', '')
                 if not headline_en: continue
-                
                 score = calculate_news_score(headline_en)
                 if score > max_score: max_score = score
                 elif score < 0 and max_score == 0: max_score = score 
@@ -218,13 +215,12 @@ def fetch_news_bg(ticker, cell):
                     
                 news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
                 news_id = str(item.get('id', random.randint(1000, 999999)))
-                
                 news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
         
         if not news: news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
-    except Exception as e:
+    except:
         cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
 
@@ -253,11 +249,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# --- [ 3. 中央引擎：開啟 Debug 除錯模式 ] ---
+# --- [ 3. 中央引擎：X光透視除錯模式 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.4 終極除錯版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.4.1 X光除錯版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -274,34 +270,52 @@ def scanner_engine():
             else:
                 url = "https://stockanalysis.com/markets/after-hours/"
 
-            # 打印當前正在連線的網址與時間，方便除錯
-            print(f"[{current_time_tw}] 正在請求資料: {url}")
-            
+            print(f"\n[{current_time_tw}] 📡 正在請求: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            print(f"[{current_time_tw}] 伺服器回傳狀態碼: {r.status_code}") # 如果這裡是 403，就是被阻擋了
+            print(f"[{current_time_tw}] ✅ 伺服器狀態碼: {r.status_code}")
             
             if r.status_code == 404:
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
                 r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-                print(f"[{current_time_tw}] 重新請求 404 網址，狀態碼: {r.status_code}")
             
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 
+                # ★ X光除錯核心段落：檢查表格內容
                 if not table:
-                    print(f"[{current_time_tw}] ⚠️ 警告：連線成功但找不到表格！網站結構可能已改變。")
-                
-                if table:
+                    print(f"[{current_time_tw}] ❌ 警告：沒有找到任何表格 (<table>)！網站可能改成 JS 動態載入了！")
+                else:
+                    rows = table.find_all('tr')
+                    print(f"[{current_time_tw}] 📊 表格解析：共找到 {len(rows)} 列 (包含標題列)")
+                    
+                    if len(rows) <= 1:
+                        print(f"[{current_time_tw}] ❌ 警告：表格只有標題，沒有任何股票資料！")
+                    else:
+                        # 印出第一筆實際股票的內容，讓我們看看欄位有沒有被改變
+                        sample_tds = rows[1].find_all('td')
+                        print(f"[{current_time_tw}] 🔍 第一筆股票資料測試：總共有 {len(sample_tds)} 個欄位 (td)")
+                        if len(sample_tds) >= 5:
+                            for i, td in enumerate(sample_tds[:6]):
+                                print(f"   欄位 [{i}]: {td.text.strip()}")
+                        else:
+                            print(f"[{current_time_tw}] ❌ 警告：欄位數量不足 5 格，解析被迫跳過！")
+
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
-                    for tr in table.find_all('tr')[1:100]: 
+                    for tr in rows[1:100]: 
                         tds = tr.find_all('td')
                         if len(tds) < 5: continue
                         
                         sym = tds[1].text.strip()
-                        try: p_num = float(tds[4].text.replace('$','').replace(',',''))
-                        except: continue
+                        raw_price = tds[4].text.strip() # 先取出文字
+                        
+                        try: 
+                            p_num = float(raw_price.replace('$','').replace(',',''))
+                        except Exception as e:
+                            # 如果價格轉換失敗，印出來警告
+                            print(f"[{current_time_tw}] ⚠️ 無法轉換價格，過濾掉股票 [{sym}]。原始字串: {raw_price}")
+                            continue
                         
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
@@ -321,14 +335,11 @@ def scanner_engine():
                             
                             is_hod_break = False
                             if p_num > cell["HOD"]: 
-                                cell["HOD"] = p_num
-                                cell["streak"] += 1
-                                is_hod_break = True
+                                cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
                             
                             gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
                             rvol = vol_raw / a if a > 0 else 1.0
                             drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
-                            
                             float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                             
                             item = {
@@ -353,15 +364,11 @@ def scanner_engine():
                                 up_ticks += 1
                                 tick_jump_pct = ((p_num - last_price) / last_price) * 100
                             elif p_num < last_price:
-                                up_ticks = 0
-                                tick_jump_pct = 0
-                                cell["last_grind_tick"] = 0 
-                                cell["last_long_grind_tick"] = 0 
+                                up_ticks = 0; tick_jump_pct = 0; cell["last_grind_tick"] = 0; cell["last_long_grind_tick"] = 0 
                             else: tick_jump_pct = 0
 
                             if is_hod_break and (rvol > 0.2 or vol_raw > 50000):
-                                c_hod.append(item)
-                                cell["last_act"] = "hod"
+                                c_hod.append(item); cell["last_act"] = "hod"
 
                             is_velocity_spike = tick_jump_pct >= 2.0
                             is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
@@ -372,27 +379,20 @@ def scanner_engine():
                                 item_surge = item.copy()
                                 if is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
                                 elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
-                                elif is_steady_grind:
-                                    item_surge["Streak"] = f"🔥連漲x{up_ticks}"
-                                    cell["last_grind_tick"] = up_ticks 
+                                elif is_steady_grind: item_surge["Streak"] = f"🔥連漲x{up_ticks}"; cell["last_grind_tick"] = up_ticks 
                                 else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
-                                c_surge.append(item_surge)
+                                c_surge.append(item_surge); cell["last_act"] = "surge"
                                 
                             if is_long_grinder and cell.get("last_long_grind_tick") != up_ticks:
                                 item_grind = item.copy()
                                 item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
-                                c_grind.append(item_grind)
-                                cell["last_long_grind_tick"] = up_ticks
+                                c_grind.append(item_grind); cell["last_long_grind_tick"] = up_ticks
 
-                            # ★ 防呆：設定為檢索中，防止同一檔股票重複開啟無數個執行緒
                             if not cell["NewsList"]: 
-                                cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
-                            cell["HOD_str"] = f"${cell['HOD']:.2f}"
-                            cell["last_price"] = p_num
-                            cell["last_vol"] = vol_raw
-                            cell["last_vol_delta"] = curr_vol_delta
+                            cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["last_price"] = p_num
+                            cell["last_vol"] = vol_raw; cell["last_vol_delta"] = curr_vol_delta
                             cell["up_ticks"] = up_ticks 
                             MASTER_BRAIN["details"][sym] = cell
 
@@ -420,14 +420,10 @@ def scanner_engine():
                         "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
-            else:
-                print(f"[{current_time_tw}] ❌ 取得資料失敗，伺服器可能正在阻擋我們的連線。")
             
             time.sleep(random.uniform(5.0, 10.0))
-            
         except Exception as e:
-            # ★ 終極除錯：如果有任何 Python 程式碼寫錯，這裡會整排印出紅色錯誤代碼！
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生嚴重錯誤：")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生錯誤：")
             traceback.print_exc()
             time.sleep(10)
 
