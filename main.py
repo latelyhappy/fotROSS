@@ -36,7 +36,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.4.1 - X光除錯版</title>
+    <title>ROSS Sniper V215.4.2 - 新聞引擎穩定版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -169,7 +169,7 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 核心情報引擎 ] ---
+# --- [ 2. 核心情報引擎 (已修復多執行緒衝突與網路阻擋) ] ---
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
@@ -198,11 +198,20 @@ def fetch_news_bg(ticker, cell):
         
         url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={target_date}&to={target_date}&token={FINNHUB_API_KEY}"
         r = requests.get(url, timeout=5)
+        
+        # 捕捉 Finnhub 額度爆表 (Rate Limit) 錯誤
+        if r.status_code == 429:
+            print(f"[{ticker}] ⚠️ Finnhub API 呼叫太頻繁，被限制了！")
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
+            return
+            
         data = r.json()
         
         news = []
         max_score = 0
         if data and isinstance(data, list):
+            # ★ 修復：為每個抓取任務建立專屬的翻譯引擎，防止執行緒互相卡死
+            local_translator = GoogleTranslator(source='auto', target='zh-TW')
             for item in data[:4]: 
                 headline_en = item.get('headline', '')
                 if not headline_en: continue
@@ -210,7 +219,7 @@ def fetch_news_bg(ticker, cell):
                 if score > max_score: max_score = score
                 elif score < 0 and max_score == 0: max_score = score 
                 
-                try: title_zh = translator.translate(headline_en)
+                try: title_zh = local_translator.translate(headline_en)
                 except: title_zh = headline_en
                     
                 news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
@@ -220,7 +229,10 @@ def fetch_news_bg(ticker, cell):
         if not news: news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
-    except:
+        print(f"[{ticker}] ✅ 新聞抓取完畢！")
+        
+    except Exception as e:
+        print(f"[{ticker}] ❌ 新聞抓取錯誤: {e}")
         cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
 
@@ -253,7 +265,7 @@ def parse_vol(v_str):
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.4.1 X光除錯版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.4.2 新聞穩定版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -270,9 +282,8 @@ def scanner_engine():
             else:
                 url = "https://stockanalysis.com/markets/after-hours/"
 
-            print(f"\n[{current_time_tw}] 📡 正在請求: {url}")
+            print(f"\n[{current_time_tw}] 📡 正在請求主陣列: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            print(f"[{current_time_tw}] ✅ 伺服器狀態碼: {r.status_code}")
             
             if r.status_code == 404:
                 url = "https://stockanalysis.com/markets/premarket/gainers/"
@@ -282,25 +293,11 @@ def scanner_engine():
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 
-                # ★ X光除錯核心段落：檢查表格內容
                 if not table:
-                    print(f"[{current_time_tw}] ❌ 警告：沒有找到任何表格 (<table>)！網站可能改成 JS 動態載入了！")
+                    print(f"[{current_time_tw}] ❌ 警告：沒有找到任何表格 (<table>)！")
                 else:
                     rows = table.find_all('tr')
-                    print(f"[{current_time_tw}] 📊 表格解析：共找到 {len(rows)} 列 (包含標題列)")
                     
-                    if len(rows) <= 1:
-                        print(f"[{current_time_tw}] ❌ 警告：表格只有標題，沒有任何股票資料！")
-                    else:
-                        # 印出第一筆實際股票的內容，讓我們看看欄位有沒有被改變
-                        sample_tds = rows[1].find_all('td')
-                        print(f"[{current_time_tw}] 🔍 第一筆股票資料測試：總共有 {len(sample_tds)} 個欄位 (td)")
-                        if len(sample_tds) >= 5:
-                            for i, td in enumerate(sample_tds[:6]):
-                                print(f"   欄位 [{i}]: {td.text.strip()}")
-                        else:
-                            print(f"[{current_time_tw}] ❌ 警告：欄位數量不足 5 格，解析被迫跳過！")
-
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
                     for tr in rows[1:100]: 
@@ -308,14 +305,11 @@ def scanner_engine():
                         if len(tds) < 5: continue
                         
                         sym = tds[1].text.strip()
-                        raw_price = tds[4].text.strip() # 先取出文字
+                        raw_price = tds[4].text.strip() 
                         
                         try: 
                             p_num = float(raw_price.replace('$','').replace(',',''))
-                        except Exception as e:
-                            # 如果價格轉換失敗，印出來警告
-                            print(f"[{current_time_tw}] ⚠️ 無法轉換價格，過濾掉股票 [{sym}]。原始字串: {raw_price}")
-                            continue
+                        except Exception as e: continue
                         
                         if 0.5 <= p_num <= 50.0:
                             f, a, prev = get_static(sym)
@@ -388,7 +382,9 @@ def scanner_engine():
                                 item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
                                 c_grind.append(item_grind); cell["last_long_grind_tick"] = up_ticks
 
+                            # ★ 修復：掛上防呆牌子，阻止主程式瘋狂派員抓新聞
                             if not cell["NewsList"]: 
+                                cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                                 
                             cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["last_price"] = p_num
