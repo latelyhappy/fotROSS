@@ -9,10 +9,9 @@ import config
 from news_engine import fetch_news_bg
 
 # ==========================================
-# 🚀 效能優化：非同步獲取 Yahoo Finance 靜態資料
+# 背景非同步獲取 Yahoo Finance 靜態資料
 # ==========================================
 def fetch_static_bg(ticker):
-    """背景小精靈：默默去 Yahoo 抓資料，不拖慢主掃描引擎"""
     try:
         t = yf.Ticker(ticker)
         i = t.info
@@ -21,14 +20,12 @@ def fetch_static_bg(ticker):
         p = i.get('previousClose', 1.0)
         config.stock_cache[ticker] = (f, a, p)
     except Exception as e:
-        config.stock_cache[ticker] = (1000000, 500000, 1.0) # 發生錯誤給予預設值
+        config.stock_cache[ticker] = (1000000, 500000, 1.0)
 
 def get_static(ticker):
-    """主引擎呼叫口：如果有快取就秒回，沒有就派背景小精靈去查，主引擎不等待"""
     if ticker in config.stock_cache:
         return config.stock_cache[ticker]
     else:
-        # 先給個暫時的預設值防呆，並標記為正在查詢，避免重複派小精靈
         config.stock_cache[ticker] = (1000000, 500000, 1.0) 
         threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
         return (1000000, 500000, 1.0)
@@ -54,14 +51,14 @@ def parse_vol(v_str):
 # ==========================================
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 極速優化版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 動態欄位防改版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
     while True:
         try:
-            loop_start_time = time.time() # ★ 記錄本輪掃描開始時間
+            loop_start_time = time.time() 
             
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_us = datetime.now(tz_us)
@@ -78,24 +75,35 @@ def scanner_engine():
                 table = soup.find('table')
                 
                 if table:
+                    # ★ 動態欄位追蹤技術：先讀取表頭，找出真正的欄位位置
+                    headers = [th.text.strip().lower() for th in table.find_all('th')]
+                    sym_idx, price_idx, change_idx, vol_idx = 1, 4, 3, 5 # 預設值防呆
+                    
+                    for i, h in enumerate(headers):
+                        if h == 'symbol': sym_idx = i
+                        elif h == 'price': price_idx = i
+                        elif '% change' in h or 'change' in h: change_idx = i
+                        elif h == 'volume': vol_idx = i
+
                     rows = table.find_all('tr')
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
                     for tr in rows[1:100]: 
                         tds = tr.find_all('td')
-                        if len(tds) < 5: continue
+                        # 確保這列有足夠的格子
+                        if len(tds) <= max(sym_idx, price_idx, change_idx, vol_idx): continue
                         
-                        sym = tds[1].text.strip()
-                        raw_price = tds[4].text.strip() 
+                        # ★ 使用動態找出的索引來抓資料
+                        sym = tds[sym_idx].text.strip()
+                        raw_price = tds[price_idx].text.strip() 
+                        change_str = tds[change_idx].text.strip()
+                        raw_vol_str = tds[vol_idx].text.strip()
                         
                         try: p_num = float(raw_price.replace('$','').replace(',',''))
                         except Exception as e: continue
                         
                         if 0.5 <= p_num <= 50.0:
-                            # ★ 這裡現在變成非同步秒回，不會卡住了！
                             f, a, prev = get_static(sym)
-                            
-                            raw_vol_str = tds[5].text.strip()
                             vol_raw = parse_vol(raw_vol_str)
                             formatted_volume = format_vol_km(vol_raw)
                             
@@ -121,7 +129,6 @@ def scanner_engine():
                             last_vol = cell.get("last_vol", vol_raw)
                             curr_vol_delta = vol_raw - last_vol 
                             
-                            # 多空量能估算邏輯
                             if curr_vol_delta > 0:
                                 if p_num > last_price: cell["cum_buy_vol"] += curr_vol_delta
                                 elif p_num < last_price: cell["cum_sell_vol"] += curr_vol_delta
@@ -130,7 +137,7 @@ def scanner_engine():
                             
                             item = {
                                 "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                                "Change": tds[3].text.strip(), "Volume": formatted_volume, 
+                                "Change": change_str, "Volume": formatted_volume, 
                                 "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "Drop": f"{drop_p:.1f}%",
                                 "FloatStr": float_str, "Streak": f"x{cell['streak']}", 
                                 "gap_num": gap_p, "rvol_num": rvol, "f_num": f,
@@ -213,11 +220,16 @@ def scanner_engine():
                         "last_update": current_time_tw, "scan_count": count
                     })
                     
-                    # ★ 印出效能數據供您確認速度
-                    cost_time = time.time() - loop_start_time
-                    print(f"[{current_time_tw}] ⏱️ 掃描完成: 找到 {len(t_all)} 檔目標，本輪耗時 {cost_time:.2f} 秒")
+                    # ★ 終極防呆檢測：如果還是 0 檔，印出原始網站的第一筆資料給我們看！
+                    if len(t_all) == 0 and len(rows) > 1:
+                        print(f"[{current_time_tw}] ⚠️ 抓到表格但目標為0。過濾前網站第一筆資料如下：")
+                        sample_tds = rows[1].find_all('td')
+                        print([td.text.strip() for td in sample_tds])
+                    else:
+                        cost_time = time.time() - loop_start_time
+                        print(f"[{current_time_tw}] ⏱️ 掃描完成: 找到 {len(t_all)} 檔目標，本輪耗時 {cost_time:.2f} 秒")
 
-            time.sleep(random.uniform(3.0, 5.0)) # 將等待時間稍微縮短，讓您感覺更即時
+            time.sleep(random.uniform(3.0, 5.0)) 
         except Exception as e:
             traceback.print_exc()
             time.sleep(5)
