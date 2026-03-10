@@ -28,7 +28,7 @@ STEALTH_HEADERS = {
 }
 
 # 🔑 請在這裡貼上您的 Finnhub API Key
-FINNHUB_API_KEY = "請填入您的KEY"
+FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
 
 # --- [ 1. 終極 UI 介面 ] ---
 HTML_TEMPLATE = """
