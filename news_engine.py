@@ -1,4 +1,4 @@
-import requests, random, pytz, traceback
+import requests, random, pytz
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import config
@@ -6,7 +6,6 @@ import config
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
-    # 5 大產業量化字典
     gen_strong_bull = ['merger', 'acquisition', 'buyout', 'special dividend']
     gen_bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive', 'share buyback', 'record']
     gen_bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'chapter 11', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default', 'shelf registration', 's-3', 'at-the-market', 'warrants']
@@ -37,52 +36,72 @@ def calculate_news_score(headline):
 
 def fetch_news_bg(ticker, cell):
     try:
-        if not config.FINNHUB_API_KEY or "請" in config.FINNHUB_API_KEY:
-            cell["NewsList"] = [{"id": "0", "title": "⚠️ 請在 api_key.txt 填寫 Finnhub API Key", "score": 0, "link": "#", "time": ""}]
+        api_key = config.FINNHUB_API_KEY
+        if not api_key or "請" in api_key:
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ 請在 api_key.txt 填寫金鑰", "score": 0, "link": "#", "time": ""}]
             cell["max_news_score"] = 0
             return
 
         tz_us = pytz.timezone('US/Eastern')
         now_us = datetime.now(tz_us)
         
-        # ★ 修復盲區：將搜索範圍擴大為「昨天到今天」，抓取隔夜盤後利多！
+        # 抓取「昨天到今天」的新聞，防止盤前時間差漏接
         today_str = now_us.strftime('%Y-%m-%d')
         yesterday_str = (now_us - timedelta(days=1)).strftime('%Y-%m-%d')
         
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={yesterday_str}&to={today_str}&token={config.FINNHUB_API_KEY}"
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={yesterday_str}&to={today_str}&token={api_key}"
         r = requests.get(url, timeout=8)
         
+        # ★ X光機：偵測被拒絕的原因
+        if r.status_code == 401:
+            print(f"[{ticker}] ❌ 金鑰無效 (401)！請確認 api_key.txt 內無多餘空格。")
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ 金鑰無效", "score": 0, "link": "#", "time": ""}]
+            return
+            
         if r.status_code == 429:
+            print(f"[{ticker}] ⚠️ Finnhub 額度已滿 (429)！")
             cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
             return
             
         data = r.json()
+        
+        if not isinstance(data, list):
+            print(f"[{ticker}] ❌ Finnhub 回傳格式異常: {data}")
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ 新聞格式異常", "score": 0, "link": "#", "time": ""}]
+            return
+
+        if len(data) == 0:
+            # 正常情況，代表該股票今天真的沒發新聞
+            cell["NewsList"] = [{"id": "0", "title": "近兩日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+            cell["max_news_score"] = 0
+            return
+
         news = []
         max_score = 0
-        if data and isinstance(data, list):
-            local_translator = GoogleTranslator(source='auto', target='zh-TW')
-            for item in data[:4]: 
-                headline_en = item.get('headline', '')
-                if not headline_en: continue
-                
-                score = calculate_news_score(headline_en)
-                if score > max_score: max_score = score
-                elif score < 0 and max_score == 0: max_score = score 
-                
-                try: title_zh = local_translator.translate(headline_en)
-                except: title_zh = headline_en
-                    
-                news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
-                news_id = str(item.get('id', random.randint(1000, 999999)))
-                news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
+        local_translator = GoogleTranslator(source='auto', target='zh-TW')
         
-        if not news: 
-            cell["NewsList"] = [{"id": "0", "title": "近兩日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
-        else:
-            cell["NewsList"] = news
+        for item in data[:4]: 
+            headline_en = item.get('headline', '')
+            if not headline_en: continue
+            
+            score = calculate_news_score(headline_en)
+            if score > max_score: max_score = score
+            elif score < 0 and max_score == 0: max_score = score 
+            
+            try: title_zh = local_translator.translate(headline_en)
+            except: title_zh = headline_en
+                
+            news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
+            news_id = str(item.get('id', random.randint(1000, 999999)))
+            news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
+        
+        cell["NewsList"] = news
         cell["max_news_score"] = max_score
         
+        # 成功抓到並打分後，印在終端機讓您安心
+        if max_score != 0:
+            print(f"[{ticker}] ✅ 抓取到關鍵情報！評分: {max_score}")
+        
     except Exception as e:
-        print(f"[{ticker}] ❌ 新聞抓取錯誤: {e}")
-        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常，請確認額度", "score": 0, "link": "#", "time": ""}]
+        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
