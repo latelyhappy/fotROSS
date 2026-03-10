@@ -1,4 +1,5 @@
-import time, threading, requests, traceback
+# scanner.py
+import time, threading, requests, traceback, random  # ★ 補上漏掉的 random
 from datetime import datetime
 import pytz
 import yfinance as yf
