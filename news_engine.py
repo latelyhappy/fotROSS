@@ -1,55 +1,38 @@
-# news_engine.py
-import requests, random, pytz
-from datetime import datetime
+import requests, random, pytz, traceback
+from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import config
 
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
-    
-    # ==========================================
-    # 🎯 產業別 NLP 催化劑量化字典 (Catalyst Lexicon)
-    # ==========================================
-
-    # 📁 1. 通用財務與公司事件 (General Financial)
+    # 5 大產業量化字典
     gen_strong_bull = ['merger', 'acquisition', 'buyout', 'special dividend']
     gen_bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive', 'share buyback', 'record']
     gen_bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'chapter 11', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default', 'shelf registration', 's-3', 'at-the-market', 'warrants']
-
-    # 📁 2. 生技與製藥產業 (Biotech & Pharma) - 爆發力最強
     bio_strong_bull = ['fda approval', 'fda clearance', 'phase 3', 'breakthrough therapy', 'fast track', 'orphan drug', 'pivotal']
     bio_bull = ['fda', 'phase 1', 'phase 2', 'ind acceptance', 'clinical update', 'top-line', 'patent']
     bio_bear = ['clinical hold', 'fda hold', 'failed', 'missed primary endpoint', 'complete response letter', 'crl']
-
-    # 📁 3. 科技與人工智慧 (Tech & AI)
     tech_strong_bull = ['artificial intelligence', 'nvidia', 'openai', 'department of defense', 'prime vendor']
     tech_bull = ['cloud', 'cybersecurity', 'software as a service', 'saas', 'integration']
     tech_bear = ['data breach', 'cyberattack', 'hacked', 'banned']
-
-    # 📁 4. 電動車與清潔能源 (EV & Clean Energy)
     ev_strong_bull = ['battery breakthrough', 'department of energy', 'doe grant', 'gigafactory']
     ev_bull = ['solar', 'ev charger', 'clean energy', 'record delivery']
     ev_bear = ['recall', 'production halt', 'supply chain issue']
-
-    # 📁 5. 加密貨幣與區塊鏈 (Crypto & Blockchain)
     crypto_strong_bull = ['bitcoin', 'spot etf']
     crypto_bull = ['ethereum', 'blockchain', 'web3', 'hash rate', 'mining']
     crypto_bear = ['crypto hack', 'unregistered securities']
 
-    # --- 彙整所有陣列進行打分 ---
     strong_bull = gen_strong_bull + bio_strong_bull + tech_strong_bull + ev_strong_bull + crypto_strong_bull
     bull = gen_bull + bio_bull + tech_bull + ev_bull + crypto_bull
     bear = gen_bear + bio_bear + tech_bear + ev_bear + crypto_bear
     
-    # 執行加扣分邏輯
     for word in strong_bull:
         if word in headline_lower: score += 10
     for word in bull:
         if word in headline_lower: score += 5
     for word in bear:
         if word in headline_lower: score -= 10
-        
     return score
 
 def fetch_news_bg(ticker, cell):
@@ -61,10 +44,13 @@ def fetch_news_bg(ticker, cell):
 
         tz_us = pytz.timezone('US/Eastern')
         now_us = datetime.now(tz_us)
-        target_date = now_us.strftime('%Y-%m-%d')
         
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={target_date}&to={target_date}&token={config.FINNHUB_API_KEY}"
-        r = requests.get(url, timeout=5)
+        # ★ 修復盲區：將搜索範圍擴大為「昨天到今天」，抓取隔夜盤後利多！
+        today_str = now_us.strftime('%Y-%m-%d')
+        yesterday_str = (now_us - timedelta(days=1)).strftime('%Y-%m-%d')
+        
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={yesterday_str}&to={today_str}&token={config.FINNHUB_API_KEY}"
+        r = requests.get(url, timeout=8)
         
         if r.status_code == 429:
             cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
@@ -79,9 +65,7 @@ def fetch_news_bg(ticker, cell):
                 headline_en = item.get('headline', '')
                 if not headline_en: continue
                 
-                # 呼叫剛才升級的產業別評分系統
                 score = calculate_news_score(headline_en)
-                
                 if score > max_score: max_score = score
                 elif score < 0 and max_score == 0: max_score = score 
                 
@@ -92,10 +76,13 @@ def fetch_news_bg(ticker, cell):
                 news_id = str(item.get('id', random.randint(1000, 999999)))
                 news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
         
-        if not news: news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
-        cell["NewsList"] = news
+        if not news: 
+            cell["NewsList"] = [{"id": "0", "title": "近兩日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+        else:
+            cell["NewsList"] = news
         cell["max_news_score"] = max_score
         
     except Exception as e:
-        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
+        print(f"[{ticker}] ❌ 新聞抓取錯誤: {e}")
+        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常，請確認額度", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
