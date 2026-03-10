@@ -1,19 +1,18 @@
 import os
 
-# --- 讀取獨立的 API KEY 文字檔 ---
-API_KEY_FILE = "api_key.txt"
-FINNHUB_API_KEY = ""
+# ★ 強制使用絕對路徑，確保系統絕對能找到您的 API KEY
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+API_KEY_FILE = os.path.join(BASE_DIR, "api_key.txt")
 
+FINNHUB_API_KEY = ""
 if os.path.exists(API_KEY_FILE):
     with open(API_KEY_FILE, "r", encoding="utf-8") as f:
         FINNHUB_API_KEY = f.read().strip()
 else:
-    # 如果檔案不存在，自動建立一個空的並提示
     with open(API_KEY_FILE, "w", encoding="utf-8") as f:
         f.write("")
-    print(f"⚠️ 找不到 {API_KEY_FILE}，已為您自動建立。請填寫您的 API Key！")
+    print(f"⚠️ 找不到 {API_KEY_FILE}，已自動建立。請填寫您的 API Key！")
 
-# --- 全域數據中樞 ---
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "net_vol_leaders": [],       
     "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
