@@ -8,9 +8,6 @@ from bs4 import BeautifulSoup
 import config
 from news_engine import fetch_news_bg
 
-# ==========================================
-# 背景非同步獲取 Yahoo Finance 靜態資料
-# ==========================================
 def fetch_static_bg(ticker):
     try:
         t = yf.Ticker(ticker)
@@ -30,9 +27,6 @@ def get_static(ticker):
         threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
         return (1000000, 500000, 1.0)
 
-# ==========================================
-# 輔助計算函數
-# ==========================================
 def format_vol_km(v_float):
     if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
     elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
@@ -46,12 +40,9 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# ==========================================
-# 核心大腦：七星陣列掃描引擎
-# ==========================================
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 動態欄位防改版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 智慧抓表防改版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -63,21 +54,35 @@ def scanner_engine():
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_us = datetime.now(tz_us)
             
-            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30): url = "https://stockanalysis.com/markets/premarket/gainers/"
-            elif 9 <= now_us.hour < 16: url = "https://stockanalysis.com/markets/gainers/"
-            else: url = "https://stockanalysis.com/markets/after-hours/"
+            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30): 
+                url = "https://stockanalysis.com/markets/premarket/gainers/"
+            elif 9 <= now_us.hour < 16: 
+                url = "https://stockanalysis.com/markets/gainers/"
+            else: 
+                url = "https://stockanalysis.com/markets/after-hours/"
 
             r = requests.get(url, headers=config.STEALTH_HEADERS, timeout=8)
-            if r.status_code == 404: r = requests.get("https://stockanalysis.com/markets/premarket/gainers/", headers=config.STEALTH_HEADERS, timeout=8)
+            if r.status_code == 404: 
+                url = "https://stockanalysis.com/markets/premarket/gainers/"
+                r = requests.get(url, headers=config.STEALTH_HEADERS, timeout=8)
             
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml')
-                table = soup.find('table')
                 
-                if table:
-                    # ★ 動態欄位追蹤技術：先讀取表頭，找出真正的欄位位置
-                    headers = [th.text.strip().lower() for th in table.find_all('th')]
-                    sym_idx, price_idx, change_idx, vol_idx = 1, 4, 3, 5 # 預設值防呆
+                # ★ 智慧表格追蹤技術：找出網頁中所有的表格，過濾掉假表格
+                tables = soup.find_all('table')
+                target_table = None
+                for t in tables:
+                    if len(t.find_all('tr')) > 10: # 真正的股票表格，列數絕對大於 10
+                        target_table = t
+                        break
+                
+                if not target_table:
+                    print(f"[{current_time_tw}] ❌ 警告：連線成功，但沒找到股票主表格！(網頁上共 {len(tables)} 個微型假表格)")
+                else:
+                    # 動態尋找欄位，避免網站更換左右順序
+                    headers = [th.text.strip().lower() for th in target_table.find_all('th')]
+                    sym_idx, price_idx, change_idx, vol_idx = 1, 4, 3, 5 # 預設值
                     
                     for i, h in enumerate(headers):
                         if h == 'symbol': sym_idx = i
@@ -85,15 +90,13 @@ def scanner_engine():
                         elif '% change' in h or 'change' in h: change_idx = i
                         elif h == 'volume': vol_idx = i
 
-                    rows = table.find_all('tr')
+                    rows = target_table.find_all('tr')
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
                     for tr in rows[1:100]: 
                         tds = tr.find_all('td')
-                        # 確保這列有足夠的格子
                         if len(tds) <= max(sym_idx, price_idx, change_idx, vol_idx): continue
                         
-                        # ★ 使用動態找出的索引來抓資料
                         sym = tds[sym_idx].text.strip()
                         raw_price = tds[price_idx].text.strip() 
                         change_str = tds[change_idx].text.strip()
@@ -220,13 +223,14 @@ def scanner_engine():
                         "last_update": current_time_tw, "scan_count": count
                     })
                     
-                    # ★ 終極防呆檢測：如果還是 0 檔，印出原始網站的第一筆資料給我們看！
-                    if len(t_all) == 0 and len(rows) > 1:
-                        print(f"[{current_time_tw}] ⚠️ 抓到表格但目標為0。過濾前網站第一筆資料如下：")
-                        sample_tds = rows[1].find_all('td')
-                        print([td.text.strip() for td in sample_tds])
+                    cost_time = time.time() - loop_start_time
+                    
+                    # ★ 終極防呆檢測：如果找到表格但還是 0 檔，印出第一筆資料查水表！
+                    if len(t_all) == 0:
+                        print(f"[{current_time_tw}] ⚠️ 抓到了主表格，但是過濾後符合「$0.5 ~ $50」條件的股票為 0 檔！")
+                        if len(rows) > 1:
+                            print(f"-> 抓取樣本測試: {rows[1].text.strip().replace(chr(10), ' ')}")
                     else:
-                        cost_time = time.time() - loop_start_time
                         print(f"[{current_time_tw}] ⏱️ 掃描完成: 找到 {len(t_all)} 檔目標，本輪耗時 {cost_time:.2f} 秒")
 
             time.sleep(random.uniform(3.0, 5.0)) 
