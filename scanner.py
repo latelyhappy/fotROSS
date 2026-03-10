@@ -1,5 +1,5 @@
 # scanner.py
-import time, threading, requests, traceback, random  # ★ 補上漏掉的 random
+import time, threading, requests, traceback, random
 from datetime import datetime
 import pytz
 import yfinance as yf
@@ -8,8 +8,11 @@ from bs4 import BeautifulSoup
 import config
 from news_engine import fetch_news_bg
 
-def get_static(ticker):
-    if ticker in config.stock_cache: return config.stock_cache[ticker]
+# ==========================================
+# 🚀 效能優化：非同步獲取 Yahoo Finance 靜態資料
+# ==========================================
+def fetch_static_bg(ticker):
+    """背景小精靈：默默去 Yahoo 抓資料，不拖慢主掃描引擎"""
     try:
         t = yf.Ticker(ticker)
         i = t.info
@@ -17,9 +20,22 @@ def get_static(ticker):
         a = i.get('averageVolume', 500000)
         p = i.get('previousClose', 1.0)
         config.stock_cache[ticker] = (f, a, p)
-        return f, a, p
-    except: return 1000000, 500000, 1.0
+    except Exception as e:
+        config.stock_cache[ticker] = (1000000, 500000, 1.0) # 發生錯誤給予預設值
 
+def get_static(ticker):
+    """主引擎呼叫口：如果有快取就秒回，沒有就派背景小精靈去查，主引擎不等待"""
+    if ticker in config.stock_cache:
+        return config.stock_cache[ticker]
+    else:
+        # 先給個暫時的預設值防呆，並標記為正在查詢，避免重複派小精靈
+        config.stock_cache[ticker] = (1000000, 500000, 1.0) 
+        threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
+        return (1000000, 500000, 1.0)
+
+# ==========================================
+# 輔助計算函數
+# ==========================================
 def format_vol_km(v_float):
     if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
     elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
@@ -33,15 +49,20 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
+# ==========================================
+# 核心大腦：七星陣列掃描引擎
+# ==========================================
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 模組拆分版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 極速優化版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
     while True:
         try:
+            loop_start_time = time.time() # ★ 記錄本輪掃描開始時間
+            
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_us = datetime.now(tz_us)
             
@@ -71,6 +92,7 @@ def scanner_engine():
                         except Exception as e: continue
                         
                         if 0.5 <= p_num <= 50.0:
+                            # ★ 這裡現在變成非同步秒回，不會卡住了！
                             f, a, prev = get_static(sym)
                             
                             raw_vol_str = tds[5].text.strip()
@@ -190,8 +212,12 @@ def scanner_engine():
                         "grinders": (c_grind + config.MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
-            
-            time.sleep(random.uniform(5.0, 10.0))
+                    
+                    # ★ 印出效能數據供您確認速度
+                    cost_time = time.time() - loop_start_time
+                    print(f"[{current_time_tw}] ⏱️ 掃描完成: 找到 {len(t_all)} 檔目標，本輪耗時 {cost_time:.2f} 秒")
+
+            time.sleep(random.uniform(3.0, 5.0)) # 將等待時間稍微縮短，讓您感覺更即時
         except Exception as e:
             traceback.print_exc()
-            time.sleep(10)
+            time.sleep(5)
