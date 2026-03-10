@@ -11,6 +11,7 @@ warnings.filterwarnings('ignore')
 app = Flask(__name__)
 CORS(app)
 
+# ★ 移除 ipos，加入 net_vol_leaders
 MASTER_BRAIN = {
     "gappers": [], "high_vol": [], "net_vol_leaders": [],       
     "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
@@ -91,16 +92,16 @@ HTML_TEMPLATE = """
         let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0; document.body.style.zoom = currentZoom; 
         let isWindowLocked = false; 
         
-        // ★ 引擎狀態記憶：從 localStorage 讀取，預設為 true
+        // ★ 引擎狀態記憶：從 localStorage 讀取，確保網頁關閉後維持狀態
         let isEngineRunning = localStorage.getItem('ross_engine_state') === null ? true : localStorage.getItem('ross_engine_state') === 'true';
-
+        
         let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
         window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
         window.toggleStar = function(id, event) { event.stopPropagation(); if(starNewsMap[id]) delete starNewsMap[id]; else starNewsMap[id] = true; localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap)); let starEl = document.getElementById('star-icon-' + id); if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆'; };
         function toggleGlobalLock() { isWindowLocked = !isWindowLocked; const btn = document.getElementById('lock-btn'); if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; } }
         
-        // ★ 更新引擎開關：切換並存入 localStorage
+        // ★ 更新引擎開關並寫入記憶
         function toggleEngineRun() { 
             isEngineRunning = !isEngineRunning; 
             localStorage.setItem('ross_engine_state', isEngineRunning);
@@ -123,11 +124,10 @@ HTML_TEMPLATE = """
         function resetZoom() { currentZoom = 1.0; document.body.style.zoom = currentZoom; localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); }
 
         window.addEventListener('DOMContentLoaded', () => { 
-            updateEngineBtnUI(); // 頁面載入時套用按鈕狀態
+            updateEngineBtnUI(); // 頁面載入時套用記憶的開關狀態
             const saved = JSON.parse(localStorage.getItem('ross_layout')); 
             if(saved) { for(const id in saved) { const win = document.getElementById(id); if(win && saved[id]) { win.style.top = saved[id].top; win.style.left = saved[id].left; win.style.width = saved[id].width; win.style.height = saved[id].height; } } } 
         });
-        
         document.querySelectorAll('.window').forEach(win => { const title = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle'); title.onmousedown = (e) => { if(isWindowLocked || e.target.tagName === 'BUTTON') return; let startX = e.clientX, startY = e.clientY; let startTop = win.offsetTop, startLeft = win.offsetLeft; document.onmousemove = (ev) => { win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px"; win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px"; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; handle.onmousedown = (e) => { if(isWindowLocked) return; let startW = win.offsetWidth, startH = win.offsetHeight; let startX = e.clientX, startY = e.clientY; document.onmousemove = (ev) => { win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px'; win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px'; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; });
 
         let isLivePaused = false;
@@ -177,12 +177,12 @@ HTML_TEMPLATE = """
                 document.getElementById('gap-list').innerHTML = buildTable(data.gappers, data.details, ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
                 document.getElementById('vol-list').innerHTML = buildTable(data.high_vol, data.details, ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr');
                 
-                // 動能移至左下 (原本 ipo 的欄位)
+                // ★ 動能移至左下角
                 document.getElementById('surge-list').innerHTML = buildTable(data.surge, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green');
                 
                 if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
                 
-                // ★ 渲染多空量能排行榜 (取代原本中央的短線動能)
+                // ★ 渲染多空量能排行榜 (取代原本中央下方的短線動能位置)
                 document.getElementById('netvol-list').innerHTML = buildTable(data.net_vol_leaders, data.details, ['代碼','價格','淨買賣(Net)','估算買盤','估算賣盤','量比'], '0.8fr 1fr 1.2fr 1.2fr 1.2fr 0.8fr', false, 'flash-green');
                 
                 document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
@@ -211,13 +211,14 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 核心情報引擎 (已更新詞彙庫) ] ---
+# --- [ 2. 核心情報引擎 (更新詞彙庫) ] ---
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
+    # ★ 更新大補丸與毒藥詞彙
     strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent', 'breakthrough', 'fast track', 'orphan', 'pivotal']
     bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive', 'department of defense', 'dod', 'award']
-    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default', 'shelf registration', 's-3', 'at-the-market', 'warrants']
+    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default', 'shelf registration', 's-3', 'at-the-market', 'atm', 'warrants']
     
     for word in strong_bull:
         if word in headline_lower: score += 10
@@ -297,11 +298,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# --- [ 3. 中央引擎 ] ---
+# --- [ 3. 中央引擎 (加入多空量能追蹤) ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 多空量能戰)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 引擎記憶與多空量能版)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -462,6 +463,8 @@ def scanner_engine():
             
             time.sleep(random.uniform(5.0, 10.0))
         except Exception as e:
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生錯誤：")
+            traceback.print_exc()
             time.sleep(10)
 
 @app.route('/data')
