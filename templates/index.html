@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>ROSS Sniper V215.5 - 模組化多空版</title>
+    <style>
+        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
+        .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
+        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
+        .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
+        .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
+        .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; right: 0; bottom: 0; cursor: se-resize; z-index: 100;}
+        .grid-row { display: grid; align-items: center; border-bottom: 1px solid #21262d; padding: 5px 0; cursor: pointer; transition: background 0.1s; }
+        .grid-row:hover { background: #161b22; }
+        .grid-th { font-weight: bold; color: #8b949e; border-bottom: 2px solid #30363d; position: sticky; top: 0; background: #0d1117; z-index: 10; padding-bottom: 5px; }
+        .text-green { color: #3fb950; font-weight: bold; } .text-red { color: #ff7b72; font-weight: bold; } .text-blue { color: #58a6ff; font-weight: bold; }
+        .text-gold { color: #f2cc60; font-weight: bold; } .text-orange { color: #ff9900; font-weight: bold; } .text-purple { color: #d500f9; font-weight: bold; }
+        .score-tag-high { background:#6e40c9; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .score-tag-pos { background:#238636; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .score-tag-neg { background:#da3633; color:#fff; padding:1px 4px; border-radius:3px; font-size:9px; margin-right:4px; font-weight:bold;}
+        .bg-cell-purple { background: #6e40c9; color: #ffffff !important; font-weight: bold; padding: 2px 4px; border-radius: 3px; display: inline-block; }
+        .row-extreme-vol { background-color: rgba(204, 173, 51, 0.2); border-left: 2px solid #ccad33; } .row-extreme-vol:hover { background-color: rgba(204, 173, 51, 0.3); }
+        .row-micro-float { background-color: rgba(138, 43, 226, 0.15); border-left: 2px solid #8a2be2; } .row-micro-float:hover { background-color: rgba(138, 43, 226, 0.25); }
+        .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; } .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
+        .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; } .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
+        .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; } .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
+        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
+        #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
+        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; } #zoom-controls button:hover { background: #30363d; }
+        @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } } @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } } @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } } @keyframes flashOrange { 0% { background-color: rgba(255, 123, 0, 0.4); } 100% { background-color: transparent; } }
+        .flash-green { animation: flashGreen 1.5s ease-out; border-left: 2px solid #3fb950; } .flash-red { animation: flashRed 1.5s ease-out; border-left: 2px solid #ff7b72; } .flash-yellow { animation: flashYellow 1.5s ease-out; border-left: 2px solid #d29922; } .flash-orange { animation: flashOrange 1.5s ease-out; border-left: 2px solid #ff7b00; }
+        .news-header { margin-top:5px; border-bottom:1px solid #30363d; padding-bottom:3px; font-size: 12px; color: #fff; }
+        .news-item-container { border-left: 2px solid #8b949e; padding-left: 6px; margin-bottom: 8px; line-height: 1.3; }
+        .news-date-tag { font-size: 10px; font-weight: bold; margin-bottom: 2px; display: inline-block; color:#8b949e;}
+        .news-title-link { font-size: 12px; font-weight: bold; color: #c9d1d9; text-decoration: none; display: inline-block; transition: color 0.2s;} .news-title-link:hover { color: #58a6ff; text-decoration: underline; }
+        .pause-btn { background: #f85149; border: 1px solid #fff; color: white; border-radius: 3px; cursor: pointer; padding: 2px 6px; font-size: 10px; font-weight: bold; margin-left: 10px;}
+    </style>
+</head>
+<body>
+    <div id="zoom-controls"><button onclick="changeZoom(0.1)">🔍 +</button><button onclick="changeZoom(-0.1)">🔍 -</button><button onclick="resetZoom()">🔄 重置</button><button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button><button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button></div>
+    
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-green">4. 短線動能追蹤</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-netvol" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
+    <div id="sys-status">🔄 掃描引擎連線中...</div>
+
+    <script>
+        let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0; document.body.style.zoom = currentZoom; 
+        let isWindowLocked = false; 
+        let isEngineRunning = localStorage.getItem('ross_engine_state') === null ? true : localStorage.getItem('ross_engine_state') === 'true';
+        let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
+
+        window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
+        window.toggleStar = function(id, event) { event.stopPropagation(); if(starNewsMap[id]) delete starNewsMap[id]; else starNewsMap[id] = true; localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap)); let starEl = document.getElementById('star-icon-' + id); if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆'; };
+        function toggleGlobalLock() { isWindowLocked = !isWindowLocked; const btn = document.getElementById('lock-btn'); if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; } }
+        
+        function toggleEngineRun() { isEngineRunning = !isEngineRunning; localStorage.setItem('ross_engine_state', isEngineRunning); updateEngineBtnUI(); }
+        function updateEngineBtnUI() { const btn = document.getElementById('engine-btn'); if(!isEngineRunning) { btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停'; } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; document.getElementById('sys-status').innerText = '🔄 系統恢復掃描中...'; } }
+
+        function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('ross_layout', JSON.stringify(layout)); }
+        function changeZoom(delta) { currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta)); document.body.style.zoom = currentZoom; localStorage.setItem('ross_zoom', currentZoom); }
+        function resetZoom() { currentZoom = 1.0; document.body.style.zoom = currentZoom; localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); }
+
+        window.addEventListener('DOMContentLoaded', () => { updateEngineBtnUI(); const saved = JSON.parse(localStorage.getItem('ross_layout')); if(saved) { for(const id in saved) { const win = document.getElementById(id); if(win && saved[id]) { win.style.top = saved[id].top; win.style.left = saved[id].left; win.style.width = saved[id].width; win.style.height = saved[id].height; } } } });
+        document.querySelectorAll('.window').forEach(win => { const title = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle'); title.onmousedown = (e) => { if(isWindowLocked || e.target.tagName === 'BUTTON') return; let startX = e.clientX, startY = e.clientY; let startTop = win.offsetTop, startLeft = win.offsetLeft; document.onmousemove = (ev) => { win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px"; win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px"; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; handle.onmousedown = (e) => { if(isWindowLocked) return; let startW = win.offsetWidth, startH = win.offsetHeight; let startX = e.clientX, startY = e.clientY; document.onmousemove = (ev) => { win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px'; win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px'; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; });
+
+        let isLivePaused = false;
+        function togglePause(e) { e.stopPropagation(); isLivePaused = !isLivePaused; const btn = document.getElementById('pause-btn'); if(isLivePaused) { btn.innerText = '▶️ 恢復滾動'; btn.style.background = '#137333'; } else { btn.innerText = '⏸️ 暫停滾動'; btn.style.background = '#a50e0e'; } }
+        function openTW(sym) { window.open(`https://tw.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
+
+        function buildTable(dataArray, detailsData, cols, colTemplate, showTime=false, baseFlashClass="flash-green", rowType="normal") {
+            let html = `<div class="grid-row grid-th" style="grid-template-columns: ${colTemplate};">`;
+            cols.forEach(c => html += `<div>${c}</div>`); html += '</div>';
+            dataArray.forEach(item => {
+                let fVal = parseFloat((item.FloatStr || "0").replace('M','').replace('K',''));
+                let isMicroFloat = ((item.FloatStr || "").includes('K') || ((item.FloatStr || "").includes('M') && fVal <= 5.0));
+                let rVal = parseFloat((item.RVOL || "0").replace('x','').replace('N/A','0'));
+                let isExtremeVol = (rVal >= 5.0);
+                let hasNews = false, isNewsRead = false;
+                let dNews = detailsData[item.Code] ? detailsData[item.Code].NewsList : [];
+                if(dNews && dNews.length > 0 && dNews[0].id && dNews[0].id !== "0") { hasNews = true; isNewsRead = dNews.some(n => readNewsMap[n.id]); }
+
+                let rowClass = "grid-row";
+                if (rowType === "grinder") rowClass += " row-grinder"; else if (isExtremeVol) rowClass += " row-extreme-vol"; else if (isMicroFloat) rowClass += " row-micro-float"; else if (hasNews) rowClass += " row-news";
+                let newsIcon = ''; if(hasNews) { newsIcon = isNewsRead ? ' <span title="新聞已讀" style="font-size:10px; opacity:0.6;">📰✔️</span>' : ' <span title="今日有新聞" style="font-size:10px;">📰</span>'; }
+                let currentFlash = baseFlashClass; if (item.Streak && rowType !== "grinder") { if (item.Streak.includes('💥')) currentFlash = "flash-yellow"; else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; }
+                if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash;
+                
+                html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate};" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
+                cols.forEach(c => {
+                    if(c === '時間') html += `<div>${item.Time}</div>`; else if(c === '代碼') html += `<div class="text-blue">${item.Code}${newsIcon}</div>`;
+                    else if(c === '價格') html += `<div>${item.Price}</div>`; else if(c === '漲幅%') html += `<div class="text-green">${item.Change}</div>`;
+                    else if(c === '跳空%') html += `<div class="text-green">${item.Gap}</div>`; else if(c === '交易量') html += `<div class="text-gold">${item.Volume}</div>`; 
+                    else if(c === '浮動股') { let fClass = "text-blue"; if (isMicroFloat) fClass = "text-purple"; else if ((item.FloatStr || "").includes('M') && fVal <= 20.0) fClass = "text-orange"; html += `<div class="${fClass}">${item.FloatStr}</div>`; }
+                    else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
+                    else if(c === '評分') { let score = item.NewsScore || 0; if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`; else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`; else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`; else html += `<div><span class="text-blue">-</span></div>`; }
+                    else if(c === '動能指標') { let txtColor = "text-green"; if (item.Streak) { if(item.Streak.includes('💥')) txtColor = "text-gold"; else if(item.Streak.includes('🚀')) txtColor = "text-orange"; else if(item.Streak.includes('🐢') || item.Streak.includes('🔥')) txtColor = "text-blue"; } html += `<div class="${txtColor}">${item.Streak || ""}</div>`; }
+                    else if(c === '淨買賣(Net)') { let nv = item.NetVolNum || 0; let nClass = nv > 0 ? "text-green" : (nv < 0 ? "text-red" : "text-blue"); html += `<div class="${nClass}" style="font-weight:900;">${item.NetVolStr}</div>`; }
+                    else if(c === '估算買盤') html += `<div class="text-green">${item.BuyVolStr || "0"}</div>`;
+                    else if(c === '估算賣盤') html += `<div class="text-red">${item.SellVolStr || "0"}</div>`;
+                }); html += '</div>';
+            }); return html;
+        }
+
+        async function refresh() {
+            if(!isEngineRunning) return; 
+            try {
+                const res = await fetch('/data?t=' + Date.now()); const data = await res.json(); data.details.last_update = data.last_update;
+                document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
+                document.getElementById('gap-list').innerHTML = buildTable(data.gappers, data.details, ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
+                document.getElementById('vol-list').innerHTML = buildTable(data.high_vol, data.details, ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr');
+                document.getElementById('surge-list').innerHTML = buildTable(data.surge, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green');
+                if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
+                document.getElementById('netvol-list').innerHTML = buildTable(data.net_vol_leaders, data.details, ['代碼','價格','淨買賣(Net)','估算買盤','估算賣盤','量比'], '0.8fr 1fr 1.2fr 1.2fr 1.2fr 0.8fr', false, 'flash-green');
+                document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
+                document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
+            } catch(e) {}
+        }
+
+        async function loadDetail(sym) {
+            const res = await fetch('/data?t=' + Date.now()); const data = await res.json(); const d = data.details[sym]; if(!d) return;
+            let newsHTML = '<h3 class="news-header">📰 今日 Finnhub 催化劑解析與評分</h3>';
+            if (d.NewsList && d.NewsList.length > 0) {
+                d.NewsList.forEach(n => {
+                    if(n.link === '#') { newsHTML += `<div style="color:#8b949e; font-size:10px;">${n.title}</div>`; } 
+                    else {
+                        let isRead = readNewsMap[n.id]; let isStarred = starNewsMap[n.id]; let titleColor = isRead ? '#6e7681' : '#c9d1d9'; let starSymbol = isStarred ? '⭐' : '☆';
+                        let scoreTag = ''; if(n.score >= 10) scoreTag = `<span class="score-tag-high">🔥 +${n.score}</span>`; else if(n.score > 0) scoreTag = `<span class="score-tag-pos">🔥 +${n.score}</span>`; else if(n.score < 0) scoreTag = `<span class="score-tag-neg">☠️ ${n.score}</span>`;
+                        newsHTML += `<div class="news-item-container"><span class="news-date-tag">${n.time}</span><span id="star-icon-${n.id}" style="cursor:pointer; float:right; color:#f2cc60;" onclick="toggleStar('${n.id}', event)">${starSymbol}</span><br>${scoreTag}<a id="news-link-${n.id}" href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor};">${n.title}</a></div>`;
+                    }
+                });
+            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
+            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
+        }
+        setInterval(refresh, 2000);
+    </script>
+</body>
+</html>
