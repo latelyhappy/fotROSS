@@ -12,7 +12,7 @@ app = Flask(__name__)
 CORS(app)
 
 MASTER_BRAIN = {
-    "gappers": [], "high_vol": [], "ipos": [],       
+    "gappers": [], "high_vol": [], "net_vol_leaders": [],       
     "hod": [], "surge": [], "news_leaders": [], "grinders": [], 
     "details": {}, "last_update": "N/A", "scan_count": 0
 }
@@ -28,7 +28,7 @@ STEALTH_HEADERS = {
 }
 
 # 🔑 請在這裡貼上您的 Finnhub API Key
-FINNHUB_API_KEY = "d2nua3hr01qsrqkq5ff0d2nua3hr01qsrqkq5ffg"
+FINNHUB_API_KEY = "請填入您的KEY"
 
 # --- [ 1. 終極 UI 介面 ] ---
 HTML_TEMPLATE = """
@@ -36,7 +36,7 @@ HTML_TEMPLATE = """
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.4.2 - 新聞引擎穩定版</title>
+    <title>ROSS Sniper V215.5 - 多空量能版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -72,11 +72,16 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div id="zoom-controls"><button onclick="changeZoom(0.1)">🔍 +</button><button onclick="changeZoom(-0.1)">🔍 -</button><button onclick="resetZoom()">🔄 重置</button><button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button><button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button></div>
+    
     <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-ipo" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 極低流通與新股</div><div class="content" id="ipo-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-surge" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-green">4. 短線動能追蹤</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    
     <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-surge" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">4. 短線動能追蹤</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-netvol" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    
     <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
@@ -84,18 +89,45 @@ HTML_TEMPLATE = """
 
     <script>
         let currentZoom = parseFloat(localStorage.getItem('ross_zoom')) || 1.0; document.body.style.zoom = currentZoom; 
-        let isWindowLocked = false; let isEngineRunning = true;
+        let isWindowLocked = false; 
+        
+        // ★ 引擎狀態記憶：從 localStorage 讀取，預設為 true
+        let isEngineRunning = localStorage.getItem('ross_engine_state') === null ? true : localStorage.getItem('ross_engine_state') === 'true';
+
         let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
         window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
         window.toggleStar = function(id, event) { event.stopPropagation(); if(starNewsMap[id]) delete starNewsMap[id]; else starNewsMap[id] = true; localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap)); let starEl = document.getElementById('star-icon-' + id); if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆'; };
         function toggleGlobalLock() { isWindowLocked = !isWindowLocked; const btn = document.getElementById('lock-btn'); if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; } }
-        function toggleEngineRun() { isEngineRunning = !isEngineRunning; const btn = document.getElementById('engine-btn'); if(!isEngineRunning) { btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停'; } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; } }
+        
+        // ★ 更新引擎開關：切換並存入 localStorage
+        function toggleEngineRun() { 
+            isEngineRunning = !isEngineRunning; 
+            localStorage.setItem('ross_engine_state', isEngineRunning);
+            updateEngineBtnUI();
+        }
+
+        function updateEngineBtnUI() {
+            const btn = document.getElementById('engine-btn'); 
+            if(!isEngineRunning) { 
+                btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; 
+                document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停'; 
+            } else { 
+                btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; 
+                document.getElementById('sys-status').innerText = '🔄 系統恢復掃描中...';
+            }
+        }
+
         function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('ross_layout', JSON.stringify(layout)); }
         function changeZoom(delta) { currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta)); document.body.style.zoom = currentZoom; localStorage.setItem('ross_zoom', currentZoom); }
         function resetZoom() { currentZoom = 1.0; document.body.style.zoom = currentZoom; localStorage.removeItem('ross_zoom'); localStorage.removeItem('ross_layout'); location.reload(); }
 
-        window.addEventListener('DOMContentLoaded', () => { const saved = JSON.parse(localStorage.getItem('ross_layout')); if(saved) { for(const id in saved) { const win = document.getElementById(id); if(win && saved[id]) { win.style.top = saved[id].top; win.style.left = saved[id].left; win.style.width = saved[id].width; win.style.height = saved[id].height; } } } });
+        window.addEventListener('DOMContentLoaded', () => { 
+            updateEngineBtnUI(); // 頁面載入時套用按鈕狀態
+            const saved = JSON.parse(localStorage.getItem('ross_layout')); 
+            if(saved) { for(const id in saved) { const win = document.getElementById(id); if(win && saved[id]) { win.style.top = saved[id].top; win.style.left = saved[id].left; win.style.width = saved[id].width; win.style.height = saved[id].height; } } } 
+        });
+        
         document.querySelectorAll('.window').forEach(win => { const title = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle'); title.onmousedown = (e) => { if(isWindowLocked || e.target.tagName === 'BUTTON') return; let startX = e.clientX, startY = e.clientY; let startTop = win.offsetTop, startLeft = win.offsetLeft; document.onmousemove = (ev) => { win.style.top = (startTop + (ev.clientY - startY) / currentZoom) + "px"; win.style.left = (startLeft + (ev.clientX - startX) / currentZoom) + "px"; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; handle.onmousedown = (e) => { if(isWindowLocked) return; let startW = win.offsetWidth, startH = win.offsetHeight; let startX = e.clientX, startY = e.clientY; document.onmousemove = (ev) => { win.style.width = (startW + (ev.clientX - startX) / currentZoom) + 'px'; win.style.height = (startH + (ev.clientY - startY) / currentZoom) + 'px'; }; document.onmouseup = () => { document.onmousemove = null; document.onmouseup = null; saveLayout(); }; }; });
 
         let isLivePaused = false;
@@ -129,6 +161,10 @@ HTML_TEMPLATE = """
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
                     else if(c === '評分') { let score = item.NewsScore || 0; if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`; else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`; else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`; else html += `<div><span class="text-blue">-</span></div>`; }
                     else if(c === '動能指標') { let txtColor = "text-green"; if (item.Streak) { if(item.Streak.includes('💥')) txtColor = "text-gold"; else if(item.Streak.includes('🚀')) txtColor = "text-orange"; else if(item.Streak.includes('🐢') || item.Streak.includes('🔥')) txtColor = "text-blue"; } html += `<div class="${txtColor}">${item.Streak || ""}</div>`; }
+                    // ★ 新增的多空量能欄位渲染
+                    else if(c === '淨買賣(Net)') { let nv = item.NetVolNum || 0; let nClass = nv > 0 ? "text-green" : (nv < 0 ? "text-red" : "text-blue"); html += `<div class="${nClass}" style="font-weight:900;">${item.NetVolStr}</div>`; }
+                    else if(c === '估算買盤') html += `<div class="text-green">${item.BuyVolStr || "0"}</div>`;
+                    else if(c === '估算賣盤') html += `<div class="text-red">${item.SellVolStr || "0"}</div>`;
                 }); html += '</div>';
             }); return html;
         }
@@ -140,9 +176,15 @@ HTML_TEMPLATE = """
                 document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
                 document.getElementById('gap-list').innerHTML = buildTable(data.gappers, data.details, ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
                 document.getElementById('vol-list').innerHTML = buildTable(data.high_vol, data.details, ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr');
-                document.getElementById('ipo-list').innerHTML = buildTable(data.ipos, data.details, ['代碼','價格','浮動股','交易量','漲幅%','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
-                if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
+                
+                // 動能移至左下 (原本 ipo 的欄位)
                 document.getElementById('surge-list').innerHTML = buildTable(data.surge, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green');
+                
+                if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
+                
+                // ★ 渲染多空量能排行榜 (取代原本中央的短線動能)
+                document.getElementById('netvol-list').innerHTML = buildTable(data.net_vol_leaders, data.details, ['代碼','價格','淨買賣(Net)','估算買盤','估算賣盤','量比'], '0.8fr 1fr 1.2fr 1.2fr 1.2fr 0.8fr', false, 'flash-green');
+                
                 document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
                 document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
             } catch(e) {}
@@ -169,13 +211,13 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# --- [ 2. 核心情報引擎 (已修復多執行緒衝突與網路阻擋) ] ---
+# --- [ 2. 核心情報引擎 (已更新詞彙庫) ] ---
 def calculate_news_score(headline):
     headline_lower = headline.lower()
     score = 0
     strong_bull = ['fda', 'phase', 'approval', 'clearance', 'merger', 'acquisition', 'buyout', 'patent', 'breakthrough', 'fast track', 'orphan', 'pivotal']
-    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive']
-    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default']
+    bull = ['earnings', 'guidance', 'upgrade', 'contract', 'partnership', 'agreement', 'raised', 'beat', 'profit', 'revenue', 'dividend', 'milestone', 'positive', 'department of defense', 'dod', 'award']
+    bear = ['offering', 'pricing', 'lawsuit', 'investigation', 'delisting', 'downgrade', 'bankruptcy', 'missed', 'loss', 'warning', 'sec', 'subpoena', 'reverse split', 'default', 'shelf registration', 's-3', 'at-the-market', 'warrants']
     
     for word in strong_bull:
         if word in headline_lower: score += 10
@@ -199,18 +241,14 @@ def fetch_news_bg(ticker, cell):
         url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={target_date}&to={target_date}&token={FINNHUB_API_KEY}"
         r = requests.get(url, timeout=5)
         
-        # 捕捉 Finnhub 額度爆表 (Rate Limit) 錯誤
         if r.status_code == 429:
-            print(f"[{ticker}] ⚠️ Finnhub API 呼叫太頻繁，被限制了！")
             cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
             return
             
         data = r.json()
-        
         news = []
         max_score = 0
         if data and isinstance(data, list):
-            # ★ 修復：為每個抓取任務建立專屬的翻譯引擎，防止執行緒互相卡死
             local_translator = GoogleTranslator(source='auto', target='zh-TW')
             for item in data[:4]: 
                 headline_en = item.get('headline', '')
@@ -229,10 +267,8 @@ def fetch_news_bg(ticker, cell):
         if not news: news = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
-        print(f"[{ticker}] ✅ 新聞抓取完畢！")
         
     except Exception as e:
-        print(f"[{ticker}] ❌ 新聞抓取錯誤: {e}")
         cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
 
@@ -261,11 +297,11 @@ def parse_vol(v_str):
         return float(v_str)
     except: return 0.0
 
-# --- [ 3. 中央引擎：X光透視除錯模式 ] ---
+# --- [ 3. 中央引擎 ] ---
 def scanner_engine():
     global MASTER_BRAIN
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.4.2 新聞穩定版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 多空量能戰)...")
     
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
@@ -275,29 +311,19 @@ def scanner_engine():
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_us = datetime.now(tz_us)
             
-            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30):
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
-            elif 9 <= now_us.hour < 16:
-                url = "https://stockanalysis.com/markets/gainers/"
-            else:
-                url = "https://stockanalysis.com/markets/after-hours/"
+            if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30): url = "https://stockanalysis.com/markets/premarket/gainers/"
+            elif 9 <= now_us.hour < 16: url = "https://stockanalysis.com/markets/gainers/"
+            else: url = "https://stockanalysis.com/markets/after-hours/"
 
-            print(f"\n[{current_time_tw}] 📡 正在請求主陣列: {url}")
             r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
-            
-            if r.status_code == 404:
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
-                r = requests.get(url, headers=STEALTH_HEADERS, timeout=8)
+            if r.status_code == 404: r = requests.get("https://stockanalysis.com/markets/premarket/gainers/", headers=STEALTH_HEADERS, timeout=8)
             
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'lxml')
                 table = soup.find('table')
                 
-                if not table:
-                    print(f"[{current_time_tw}] ❌ 警告：沒有找到任何表格 (<table>)！")
-                else:
+                if table:
                     rows = table.find_all('tr')
-                    
                     t_all, c_hod, c_surge, c_grind = [], [], [], []
                     
                     for tr in rows[1:100]: 
@@ -307,8 +333,7 @@ def scanner_engine():
                         sym = tds[1].text.strip()
                         raw_price = tds[4].text.strip() 
                         
-                        try: 
-                            p_num = float(raw_price.replace('$','').replace(',',''))
+                        try: p_num = float(raw_price.replace('$','').replace(',',''))
                         except Exception as e: continue
                         
                         if 0.5 <= p_num <= 50.0:
@@ -324,12 +349,12 @@ def scanner_engine():
                             cell = MASTER_BRAIN["details"].get(sym, {
                                 "HOD": initial_hod, "NewsList": [], "max_news_score": 0, "streak": 0, "last_act": "",
                                 "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
-                                "up_ticks": 0, "last_grind_tick": 0, "last_long_grind_tick": 0 
+                                "up_ticks": 0, "last_grind_tick": 0, "last_long_grind_tick": 0,
+                                "cum_buy_vol": 0, "cum_sell_vol": 0 # ★ 新增多空量能追蹤器
                             })
                             
                             is_hod_break = False
-                            if p_num > cell["HOD"]: 
-                                cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
+                            if p_num > cell["HOD"]: cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
                             
                             gap_p = ((p_num - prev) / prev * 100) if prev > 0 else 0
                             rvol = vol_raw / a if a > 0 else 1.0
@@ -343,16 +368,28 @@ def scanner_engine():
                                 "FloatStr": float_str, "Streak": f"x{cell['streak']}", 
                                 "gap_num": gap_p, "rvol_num": rvol, "f_num": f
                             }
-                            t_all.append(item)
                             
+                            last_price = cell.get("last_price", p_num)
+                            last_vol = cell.get("last_vol", vol_raw)
+                            curr_vol_delta = vol_raw - last_vol 
+                            
+                            # ★ K線多空量能估算邏輯
+                            if curr_vol_delta > 0:
+                                if p_num > last_price: cell["cum_buy_vol"] += curr_vol_delta
+                                elif p_num < last_price: cell["cum_sell_vol"] += curr_vol_delta
+
+                            net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
+                            item["NetVolNum"] = net_vol
+                            item["NetVolStr"] = f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}"
+                            item["BuyVolStr"] = format_vol_km(cell["cum_buy_vol"])
+                            item["SellVolStr"] = format_vol_km(cell["cum_sell_vol"])
+
+                            t_all.append(item)
                             cell["latest_item"] = item
                             cell["last_seen"] = current_time_tw
 
-                            last_price = cell.get("last_price", p_num)
-                            last_vol = cell.get("last_vol", vol_raw)
                             last_vol_delta = cell.get("last_vol_delta", 0)
                             up_ticks = cell.get("up_ticks", 0) 
-                            curr_vol_delta = vol_raw - last_vol 
                             
                             if p_num > last_price:
                                 up_ticks += 1
@@ -361,8 +398,7 @@ def scanner_engine():
                                 up_ticks = 0; tick_jump_pct = 0; cell["last_grind_tick"] = 0; cell["last_long_grind_tick"] = 0 
                             else: tick_jump_pct = 0
 
-                            if is_hod_break and (rvol > 0.2 or vol_raw > 50000):
-                                c_hod.append(item); cell["last_act"] = "hod"
+                            if is_hod_break and (rvol > 0.2 or vol_raw > 50000): c_hod.append(item); cell["last_act"] = "hod"
 
                             is_velocity_spike = tick_jump_pct >= 2.0
                             is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
@@ -382,7 +418,6 @@ def scanner_engine():
                                 item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
                                 c_grind.append(item_grind); cell["last_long_grind_tick"] = up_ticks
 
-                            # ★ 修復：掛上防呆牌子，阻止主程式瘋狂派員抓新聞
                             if not cell["NewsList"]: 
                                 cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
                                 threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
@@ -395,32 +430,38 @@ def scanner_engine():
                     count += 1
                     
                     news_list_temp = []
+                    net_vol_temp = []
                     for k_sym, k_cell in MASTER_BRAIN["details"].items():
-                        score = k_cell.get("max_news_score", 0)
-                        if score != 0 and "latest_item" in k_cell and k_cell.get("last_seen") == current_time_tw:
-                            i_copy = k_cell["latest_item"].copy()
-                            i_copy["NewsScore"] = score
-                            news_list_temp.append(i_copy)
+                        if "latest_item" in k_cell and k_cell.get("last_seen") == current_time_tw:
+                            score = k_cell.get("max_news_score", 0)
+                            if score != 0:
+                                i_copy = k_cell["latest_item"].copy()
+                                i_copy["NewsScore"] = score
+                                news_list_temp.append(i_copy)
+                            
+                            # ★ 將有買賣紀錄的股票加入多空陣列
+                            if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
+                                net_vol_temp.append(k_cell["latest_item"].copy())
                             
                     news_leaders = sorted(news_list_temp, key=lambda x: x["NewsScore"], reverse=True)[:20]
+                    # ★ 依照「淨買賣絕對值」排序，抓出多空交戰最激烈的標的
+                    net_vol_leaders = sorted(net_vol_temp, key=lambda x: abs(x.get("NetVolNum", 0)), reverse=True)[:20]
 
                     gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                     high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
-                    ipos = sorted([x for x in t_all if x["f_num"] < 10000000], key=lambda x: x["gap_num"], reverse=True)[:20]
                     
                     MASTER_BRAIN.update({
-                        "gappers": gappers, "high_vol": high_vol, "ipos": ipos,
+                        "gappers": gappers, "high_vol": high_vol,
                         "hod": (c_hod + MASTER_BRAIN["hod"])[:1000],
                         "surge": (c_surge + MASTER_BRAIN["surge"])[:1000],
                         "news_leaders": news_leaders, 
+                        "net_vol_leaders": net_vol_leaders, # ★ 更新多空排行榜
                         "grinders": (c_grind + MASTER_BRAIN.get("grinders", []))[:1000],
                         "last_update": current_time_tw, "scan_count": count
                     })
             
             time.sleep(random.uniform(5.0, 10.0))
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生錯誤：")
-            traceback.print_exc()
             time.sleep(10)
 
 @app.route('/data')
