@@ -50,7 +50,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 模組串連版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 淨買量連續性版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -140,7 +140,7 @@ def scanner_engine():
                                 extracted_stocks.append({'sym': sym, 'price': p_num, 'change_str': change_str, 'vol_raw': vol_raw})
                             except: continue
 
-                t_all, c_hod, c_surge, c_grind = [], [], [], []
+                t_all, c_hod, c_surge = [], [], []
                 
                 for data in extracted_stocks:
                     sym = data['sym']
@@ -158,8 +158,9 @@ def scanner_engine():
                         cell = config.MASTER_BRAIN["details"].get(sym, {
                             "HOD": initial_hod, "NewsList": [], "max_news_score": 0, "streak": 0, "last_act": "",
                             "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
-                            "up_ticks": 0, "last_grind_tick": 0, "last_long_grind_tick": 0,
-                            "cum_buy_vol": 0, "cum_sell_vol": 0
+                            "up_ticks": 0, 
+                            "cum_buy_vol": 0, "cum_sell_vol": 0,
+                            "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False # ★ 新增狀態追蹤器
                         })
                         
                         is_hod_break = False
@@ -174,9 +175,22 @@ def scanner_engine():
                         last_vol = cell.get("last_vol", vol_raw)
                         curr_vol_delta = vol_raw - last_vol 
                         
+                        # ★ 核心革命：拋棄單看價格，改看「淨買賣量連續成長次數」
                         if curr_vol_delta > 0:
-                            if p_num > last_price: cell["cum_buy_vol"] += curr_vol_delta
-                            elif p_num < last_price: cell["cum_sell_vol"] += curr_vol_delta
+                            if p_num > last_price: 
+                                cell["cum_buy_vol"] += curr_vol_delta
+                                cell["pos_vol_streak"] += 1     # 買量連續+1
+                                cell["neg_vol_streak"] = 0      # 賣量紀錄歸零
+                            elif p_num < last_price: 
+                                cell["cum_sell_vol"] += curr_vol_delta
+                                cell["neg_vol_streak"] += 1     # 賣量連續+1
+                                cell["pos_vol_streak"] = 0      # 買量紀錄歸零
+                                
+                        # ★ 嚴格的生死判定 (連續 5 次決定去留)
+                        if cell["pos_vol_streak"] >= 5:
+                            cell["is_grinder"] = True
+                        elif cell["neg_vol_streak"] >= 5:
+                            cell["is_grinder"] = False
 
                         net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
                         
@@ -202,30 +216,21 @@ def scanner_engine():
                         if p_num > last_price:
                             up_ticks += 1; tick_jump_pct = ((p_num - last_price) / last_price) * 100
                         elif p_num < last_price:
-                            up_ticks = 0; tick_jump_pct = 0; cell["last_grind_tick"] = 0; cell["last_long_grind_tick"] = 0 
+                            up_ticks = 0; tick_jump_pct = 0 
                         else: tick_jump_pct = 0
 
                         if is_hod_break and (rvol > 0.2 or vol_raw > 50000): c_hod.append(item); cell["last_act"] = "hod"
 
                         is_velocity_spike = tick_jump_pct >= 2.0
-                        is_steady_grind = (up_ticks >= 3 and up_ticks % 3 == 0 and cell.get("last_grind_tick") != up_ticks)
                         is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
-                        is_long_grinder = (up_ticks >= 6 and tick_jump_pct < 3.0 and drop_p > -5.0 and p_num >= 1.0)
                         
-                        if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_steady_grind or is_vol_spike:
+                        if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_vol_spike:
                             item_surge = item.copy()
                             if is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
                             elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
-                            elif is_steady_grind: item_surge["Streak"] = f"🔥連漲x{up_ticks}"; cell["last_grind_tick"] = up_ticks 
                             else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                             c_surge.append(item_surge); cell["last_act"] = "surge"
-                            
-                        if is_long_grinder and cell.get("last_long_grind_tick") != up_ticks:
-                            item_grind = item.copy()
-                            item_grind["Streak"] = f"🐢緩漲x{up_ticks}"
-                            c_grind.append(item_grind); cell["last_long_grind_tick"] = up_ticks
 
-                        # ★ 串聯情報引擎：多執行緒安全呼叫
                         if not cell["NewsList"]: 
                             cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
                             threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
@@ -236,7 +241,7 @@ def scanner_engine():
                         config.MASTER_BRAIN["details"][sym] = cell
 
                 count += 1
-                news_list_temp, net_vol_temp = [], []
+                news_list_temp, net_vol_temp, active_grinders = [], [], []
                 
                 for k_sym, k_cell in config.MASTER_BRAIN["details"].items():
                     if "latest_item" in k_cell and k_cell.get("last_seen") == current_time_tw:
@@ -248,20 +253,40 @@ def scanner_engine():
                         
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
+                            
+                        # ★ 提取所有活躍中的緩漲股，並掛上專屬標籤
+                        if k_cell.get("is_grinder", False):
+                            item_grind = k_cell["latest_item"].copy()
+                            pos_count = k_cell.get("pos_vol_streak", 0)
+                            neg_count = k_cell.get("neg_vol_streak", 0)
+                            
+                            item_grind["GrindCount"] = pos_count # 新增的資料欄位
+                            
+                            # 洗盤與吸籌的視覺化
+                            if pos_count > 0:
+                                item_grind["Streak"] = f"🔥買量連增x{pos_count}"
+                            elif neg_count > 0:
+                                item_grind["Streak"] = f"⚠️賣單洗盤x{neg_count}"
+                            else:
+                                item_grind["Streak"] = f"⏸️無量橫盤"
+                                
+                            active_grinders.append(item_grind)
                         
                 news_leaders = sorted(news_list_temp, key=lambda x: x["NewsScore"], reverse=True)[:20]
                 net_vol_leaders = sorted(net_vol_temp, key=lambda x: abs(x.get("NetVolNum", 0)), reverse=True)[:20]
-
                 gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                 high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                 
+                # 將緩漲名單依照「持續上漲次數」排行，數字越大的在越上面
+                active_grinders = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)[:20]
+
                 config.MASTER_BRAIN.update({
                     "gappers": gappers, "high_vol": high_vol,
                     "hod": (c_hod + config.MASTER_BRAIN["hod"])[:1000],
                     "surge": (c_surge + config.MASTER_BRAIN["surge"])[:1000],
                     "news_leaders": news_leaders, 
                     "net_vol_leaders": net_vol_leaders, 
-                    "grinders": (c_grind + config.MASTER_BRAIN.get("grinders", []))[:1000],
+                    "grinders": active_grinders, # ★ 送出乾淨且包含新欄位的名單
                     "last_update": current_time_tw, "scan_count": count
                 })
                 
