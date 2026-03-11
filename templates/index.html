@@ -105,6 +105,9 @@
                     else if(c === '淨買賣(Net)') { let nv = item.NetVolNum || 0; let nClass = nv > 0 ? "text-green" : (nv < 0 ? "text-red" : "text-blue"); html += `<div class="${nClass}" style="font-weight:900;">${item.NetVolStr}</div>`; }
                     else if(c === '估算買盤') html += `<div class="text-green">${item.BuyVolStr || "0"}</div>`;
                     else if(c === '估算賣盤') html += `<div class="text-red">${item.SellVolStr || "0"}</div>`;
+                    else if(c === '動能指標') { let txtColor = "text-green"; if (item.Streak) { if(item.Streak.includes('💥')) txtColor = "text-gold"; else if(item.Streak.includes('🚀')) txtColor = "text-orange"; else if(item.Streak.includes('🐢') || item.Streak.includes('🔥')) txtColor = "text-blue"; else if(item.Streak.includes('⚠️')) txtColor = "text-red"; } html += `<div class="${txtColor}">${item.Streak || ""}</div>`; }
+                    // ★ 增加這行：專屬的持續上漲次數欄位
+                    else if(c === '持續上漲次數') { let gc = item.GrindCount || 0; let gcClass = gc > 0 ? "text-purple" : "text-blue"; html += `<div class="${gcClass}" style="font-weight:bold; font-size:12px;">${gc}</div>`; }
                 }); html += '</div>';
             }); return html;
         }
@@ -120,7 +123,7 @@
                 if (!isLivePaused) { document.getElementById('hod-list').innerHTML = buildTable(data.hod, data.details, ['時間','代碼','價格','漲幅%','交易量','量比','浮動股'], '1fr 0.8fr 1fr 1fr 1.2fr 0.8fr 1fr', true, 'flash-green'); }
                 document.getElementById('netvol-list').innerHTML = buildTable(data.net_vol_leaders, data.details, ['代碼','價格','淨買賣(Net)','估算買盤','估算賣盤','量比'], '0.8fr 1fr 1.2fr 1.2fr 1.2fr 0.8fr', false, 'flash-green');
                 document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
-                document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
+                document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','持續上漲次數','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
             } catch(e) {}
         }
 
