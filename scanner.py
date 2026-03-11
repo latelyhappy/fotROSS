@@ -1,3 +1,4 @@
+# scanner.py
 import time, threading, requests, traceback, random, json
 from datetime import datetime
 import pytz
@@ -50,7 +51,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 淨買量連續性版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 淨買量連續性版 - Bug修復)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -140,7 +141,8 @@ def scanner_engine():
                                 extracted_stocks.append({'sym': sym, 'price': p_num, 'change_str': change_str, 'vol_raw': vol_raw})
                             except: continue
 
-                t_all, c_hod, c_surge = [], [], []
+                # ★ 修復點：加入 c_grind 空陣列，防止舊代碼拋出 NameError 崩潰
+                t_all, c_hod, c_surge, c_grind = [], [], [], []
                 
                 for data in extracted_stocks:
                     sym = data['sym']
@@ -160,7 +162,7 @@ def scanner_engine():
                             "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
                             "up_ticks": 0, 
                             "cum_buy_vol": 0, "cum_sell_vol": 0,
-                            "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False # ★ 新增狀態追蹤器
+                            "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False
                         })
                         
                         is_hod_break = False
@@ -175,18 +177,17 @@ def scanner_engine():
                         last_vol = cell.get("last_vol", vol_raw)
                         curr_vol_delta = vol_raw - last_vol 
                         
-                        # ★ 核心革命：拋棄單看價格，改看「淨買賣量連續成長次數」
+                        # ★ 淨量連續性判定
                         if curr_vol_delta > 0:
                             if p_num > last_price: 
                                 cell["cum_buy_vol"] += curr_vol_delta
-                                cell["pos_vol_streak"] += 1     # 買量連續+1
-                                cell["neg_vol_streak"] = 0      # 賣量紀錄歸零
+                                cell["pos_vol_streak"] += 1     
+                                cell["neg_vol_streak"] = 0      
                             elif p_num < last_price: 
                                 cell["cum_sell_vol"] += curr_vol_delta
-                                cell["neg_vol_streak"] += 1     # 賣量連續+1
-                                cell["pos_vol_streak"] = 0      # 買量紀錄歸零
+                                cell["neg_vol_streak"] += 1     
+                                cell["pos_vol_streak"] = 0      
                                 
-                        # ★ 嚴格的生死判定 (連續 5 次決定去留)
                         if cell["pos_vol_streak"] >= 5:
                             cell["is_grinder"] = True
                         elif cell["neg_vol_streak"] >= 5:
@@ -254,15 +255,14 @@ def scanner_engine():
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
                             
-                        # ★ 提取所有活躍中的緩漲股，並掛上專屬標籤
+                        # ★ 擷取活躍緩漲股
                         if k_cell.get("is_grinder", False):
                             item_grind = k_cell["latest_item"].copy()
                             pos_count = k_cell.get("pos_vol_streak", 0)
                             neg_count = k_cell.get("neg_vol_streak", 0)
                             
-                            item_grind["GrindCount"] = pos_count # 新增的資料欄位
+                            item_grind["GrindCount"] = pos_count 
                             
-                            # 洗盤與吸籌的視覺化
                             if pos_count > 0:
                                 item_grind["Streak"] = f"🔥買量連增x{pos_count}"
                             elif neg_count > 0:
@@ -277,7 +277,6 @@ def scanner_engine():
                 gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                 high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
                 
-                # 將緩漲名單依照「持續上漲次數」排行，數字越大的在越上面
                 active_grinders = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)[:20]
 
                 config.MASTER_BRAIN.update({
@@ -286,7 +285,7 @@ def scanner_engine():
                     "surge": (c_surge + config.MASTER_BRAIN["surge"])[:1000],
                     "news_leaders": news_leaders, 
                     "net_vol_leaders": net_vol_leaders, 
-                    "grinders": active_grinders, # ★ 送出乾淨且包含新欄位的名單
+                    "grinders": active_grinders, 
                     "last_update": current_time_tw, "scan_count": count
                 })
                 
@@ -298,5 +297,7 @@ def scanner_engine():
 
             time.sleep(random.uniform(3.0, 5.0)) 
         except Exception as e:
+            # 加入列印完整的錯誤訊息幫助追蹤，並縮短等待時間
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生例外錯誤，重啟迴圈：")
             traceback.print_exc()
-            time.sleep(5)
+            time.sleep(3)
