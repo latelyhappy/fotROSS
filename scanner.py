@@ -1,4 +1,3 @@
-# scanner.py
 import time, threading, requests, traceback, random, json
 from datetime import datetime
 import pytz
@@ -51,7 +50,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 淨買量連續性版 - Bug修復)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 微幅回調狙擊版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -141,7 +140,6 @@ def scanner_engine():
                                 extracted_stocks.append({'sym': sym, 'price': p_num, 'change_str': change_str, 'vol_raw': vol_raw})
                             except: continue
 
-                # ★ 修復點：加入 c_grind 空陣列，防止舊代碼拋出 NameError 崩潰
                 t_all, c_hod, c_surge, c_grind = [], [], [], []
                 
                 for data in extracted_stocks:
@@ -162,7 +160,10 @@ def scanner_engine():
                             "last_price": p_num, "last_vol": vol_raw, "last_vol_delta": 0,
                             "up_ticks": 0, 
                             "cum_buy_vol": 0, "cum_sell_vol": 0,
-                            "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False
+                            "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False,
+                            # ★ 新增：微幅回調與狀態記憶體
+                            "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
+                            "no_vol_shakeout": False, "bull_trap": False
                         })
                         
                         is_hod_break = False
@@ -177,7 +178,7 @@ def scanner_engine():
                         last_vol = cell.get("last_vol", vol_raw)
                         curr_vol_delta = vol_raw - last_vol 
                         
-                        # ★ 淨量連續性判定
+                        # 淨買賣量判定
                         if curr_vol_delta > 0:
                             if p_num > last_price: 
                                 cell["cum_buy_vol"] += curr_vol_delta
@@ -188,12 +189,42 @@ def scanner_engine():
                                 cell["neg_vol_streak"] += 1     
                                 cell["pos_vol_streak"] = 0      
                                 
-                        if cell["pos_vol_streak"] >= 5:
-                            cell["is_grinder"] = True
-                        elif cell["neg_vol_streak"] >= 5:
-                            cell["is_grinder"] = False
+                        if cell["pos_vol_streak"] >= 5: cell["is_grinder"] = True
+                        elif cell["neg_vol_streak"] >= 5: cell["is_grinder"] = False
 
                         net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
+
+                        # ==========================================
+                        # ★ 狙擊邏輯 1 & 2：無量洗盤 與 微幅回調狙擊
+                        # ==========================================
+                        recent_high = cell.get("recent_high", initial_hod)
+                        is_pullback = cell.get("is_pullback", False)
+                        sniper_triggered = False
+                        no_vol_shakeout = False
+
+                        if p_num > recent_high:
+                            if is_pullback: sniper_triggered = True # 突破回調高點，扣板機！
+                            is_pullback = False
+                            recent_high = p_num
+                        elif p_num < last_price:
+                            if curr_vol_delta <= 1500: # 窒息量偵測 (新增單量極小)
+                                no_vol_shakeout = True
+                            if p_num >= recent_high * 0.90 and net_vol > 0: # 跌幅不深且主力未出貨
+                                is_pullback = True
+
+                        # ==========================================
+                        # ★ 狙擊邏輯 3：假突破 (Bull Trap) 排雷
+                        # ==========================================
+                        bull_trap = False
+                        if is_hod_break and net_vol < 0: # 創高但淨買量為負
+                            bull_trap = True
+
+                        # 存回大腦記憶體
+                        cell["recent_high"] = recent_high
+                        cell["is_pullback"] = is_pullback
+                        cell["sniper_triggered"] = sniper_triggered
+                        cell["no_vol_shakeout"] = no_vol_shakeout
+                        cell["bull_trap"] = bull_trap
                         
                         item = {
                             "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
@@ -220,17 +251,27 @@ def scanner_engine():
                             up_ticks = 0; tick_jump_pct = 0 
                         else: tick_jump_pct = 0
 
-                        if is_hod_break and (rvol > 0.2 or vol_raw > 50000): c_hod.append(item); cell["last_act"] = "hod"
+                        # ★ 寫入破高區塊 (包含 Bull Trap 警告)
+                        if is_hod_break and (rvol > 0.2 or vol_raw > 50000): 
+                            item_hod = item.copy()
+                            if bull_trap: item_hod["Streak"] = "⚠️虛漲倒貨"
+                            else: item_hod["Streak"] = f"⭐破高x{cell['streak']}"
+                            c_hod.append(item_hod)
+                            cell["last_act"] = "hod"
 
                         is_velocity_spike = tick_jump_pct >= 2.0
                         is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                         
-                        if (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_vol_spike:
+                        # ★ 寫入動能追蹤區塊
+                        if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_vol_spike:
                             item_surge = item.copy()
-                            if is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
+                            if sniper_triggered: item_surge["Streak"] = "🎯精準狙擊"
+                            elif bull_trap and is_hod_break: item_surge["Streak"] = "⚠️虛漲倒貨"
+                            elif is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
                             elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                             else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
-                            c_surge.append(item_surge); cell["last_act"] = "surge"
+                            c_surge.append(item_surge)
+                            cell["last_act"] = "surge"
 
                         if not cell["NewsList"]: 
                             cell["NewsList"] = [{"id": "0", "title": "檢索中...", "score": 0, "link": "#", "time": ""}]
@@ -255,15 +296,25 @@ def scanner_engine():
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
                             
-                        # ★ 擷取活躍緩漲股
+                        # ★ 擷取活躍緩漲股 (寫入洗盤與盯盤狀態)
                         if k_cell.get("is_grinder", False):
                             item_grind = k_cell["latest_item"].copy()
                             pos_count = k_cell.get("pos_vol_streak", 0)
                             neg_count = k_cell.get("neg_vol_streak", 0)
                             
+                            is_pb = k_cell.get("is_pullback", False)
+                            no_vol = k_cell.get("no_vol_shakeout", False)
+                            sniped = k_cell.get("sniper_triggered", False)
+                            
                             item_grind["GrindCount"] = pos_count 
                             
-                            if pos_count > 0:
+                            if sniped:
+                                item_grind["Streak"] = "🎯精準狙擊"
+                            elif no_vol:
+                                item_grind["Streak"] = "🛑無量洗盤"
+                            elif is_pb:
+                                item_grind["Streak"] = "👀回調盯盤"
+                            elif pos_count > 0:
                                 item_grind["Streak"] = f"🔥買量連增x{pos_count}"
                             elif neg_count > 0:
                                 item_grind["Streak"] = f"⚠️賣單洗盤x{neg_count}"
@@ -297,7 +348,6 @@ def scanner_engine():
 
             time.sleep(random.uniform(3.0, 5.0)) 
         except Exception as e:
-            # 加入列印完整的錯誤訊息幫助追蹤，並縮短等待時間
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生例外錯誤，重啟迴圈：")
             traceback.print_exc()
             time.sleep(3)
