@@ -45,11 +45,11 @@ def fetch_news_bg(ticker, cell):
         tz_us = pytz.timezone('US/Eastern')
         now_us = datetime.now(tz_us)
         
-        # ★ 修復點：將回溯時間拉長到 3 天，完美覆蓋週末盲區，禮拜一抓得到禮拜五的新聞！
+        # ★ 修復點：嚴格鎖定「只抓當天（美東時間）」。如果今天是 3/14，就只顯示 3/14！
         today_str = now_us.strftime('%Y-%m-%d')
-        start_date_str = (now_us - timedelta(days=3)).strftime('%Y-%m-%d')
         
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date_str}&to={today_str}&token={api_key}"
+        # 將 from 和 to 都設定為 today_str
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={today_str}&to={today_str}&token={api_key}"
         r = requests.get(url, timeout=8)
         
         if r.status_code == 401:
@@ -64,7 +64,8 @@ def fetch_news_bg(ticker, cell):
         data = r.json()
         
         if not isinstance(data, list) or len(data) == 0:
-            cell["NewsList"] = [{"id": "0", "title": "近三日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+            # 提示字眼改為「今日」
+            cell["NewsList"] = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
             cell["max_news_score"] = 0
             return
 
