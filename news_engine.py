@@ -45,34 +45,26 @@ def fetch_news_bg(ticker, cell):
         tz_us = pytz.timezone('US/Eastern')
         now_us = datetime.now(tz_us)
         
-        # 抓取「昨天到今天」的新聞，防止盤前時間差漏接
+        # ★ 修復點：將回溯時間拉長到 3 天，完美覆蓋週末盲區，禮拜一抓得到禮拜五的新聞！
         today_str = now_us.strftime('%Y-%m-%d')
-        yesterday_str = (now_us - timedelta(days=1)).strftime('%Y-%m-%d')
+        start_date_str = (now_us - timedelta(days=3)).strftime('%Y-%m-%d')
         
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={yesterday_str}&to={today_str}&token={api_key}"
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date_str}&to={today_str}&token={api_key}"
         r = requests.get(url, timeout=8)
         
-        # ★ X光機：偵測被拒絕的原因
         if r.status_code == 401:
-            print(f"[{ticker}] ❌ 金鑰無效 (401)！請確認 api_key.txt 內無多餘空格。")
+            print(f"[{ticker}] ❌ 金鑰無效 (401)！")
             cell["NewsList"] = [{"id": "0", "title": "⚠️ 金鑰無效", "score": 0, "link": "#", "time": ""}]
             return
             
         if r.status_code == 429:
-            print(f"[{ticker}] ⚠️ Finnhub 額度已滿 (429)！")
             cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
             return
             
         data = r.json()
         
-        if not isinstance(data, list):
-            print(f"[{ticker}] ❌ Finnhub 回傳格式異常: {data}")
-            cell["NewsList"] = [{"id": "0", "title": "⚠️ 新聞格式異常", "score": 0, "link": "#", "time": ""}]
-            return
-
-        if len(data) == 0:
-            # 正常情況，代表該股票今天真的沒發新聞
-            cell["NewsList"] = [{"id": "0", "title": "近兩日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+        if not isinstance(data, list) or len(data) == 0:
+            cell["NewsList"] = [{"id": "0", "title": "近三日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
             cell["max_news_score"] = 0
             return
 
@@ -97,10 +89,6 @@ def fetch_news_bg(ticker, cell):
         
         cell["NewsList"] = news
         cell["max_news_score"] = max_score
-        
-        # 成功抓到並打分後，印在終端機讓您安心
-        if max_score != 0:
-            print(f"[{ticker}] ✅ 抓取到關鍵情報！評分: {max_score}")
         
     except Exception as e:
         cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
