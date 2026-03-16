@@ -35,10 +35,10 @@ def calculate_news_score(headline):
     return score
 
 def fetch_news_bg(ticker, cell):
-    # ★ 防暴衝機制：初次啟動時，讓每檔股票隨機休眠 0.5~8 秒再出發，避免瞬間塞爆 API
+    # 防暴衝機制：初次啟動時，讓每檔股票隨機休眠 0.5~8 秒再出發
     time.sleep(random.uniform(0.5, 8.0))
     
-    # ★ 核心改寫：改為無窮迴圈 (持續抓取)，完全不影響主程式運作！
+    # 無窮迴圈 (持續抓取)，完全不影響主程式運作！
     while True:
         try:
             api_key = config.FINNHUB_API_KEY
@@ -46,15 +46,17 @@ def fetch_news_bg(ticker, cell):
                 if not cell.get("NewsList") or cell["NewsList"][0]["title"] == "檢索中...":
                     cell["NewsList"] = [{"id": "0", "title": "⚠️ 請在 api_key.txt 填寫金鑰", "score": 0, "link": "#", "time": ""}]
                 cell["max_news_score"] = 0
-                time.sleep(60) # 等待 1 分鐘後再檢查金鑰是否填好
+                time.sleep(60) 
                 continue
 
             tz_us = pytz.timezone('US/Eastern')
             now_us = datetime.now(tz_us)
             
-            # 嚴格鎖定當日新聞
+            # ★ 恢復 3 天回溯，不錯過預告型催化劑
             today_str = now_us.strftime('%Y-%m-%d')
-            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={today_str}&to={today_str}&token={api_key}"
+            start_date_str = (now_us - timedelta(days=3)).strftime('%Y-%m-%d')
+            
+            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={start_date_str}&to={today_str}&token={api_key}"
             
             r = requests.get(url, timeout=8)
             
@@ -66,14 +68,13 @@ def fetch_news_bg(ticker, cell):
             if r.status_code == 429:
                 if not cell.get("NewsList") or cell["NewsList"][0]["title"] == "檢索中...":
                     cell["NewsList"] = [{"id": "0", "title": "⏳ API 滿載，持續背景重試中...", "score": 0, "link": "#", "time": ""}]
-                # 遇到 429，隨機休眠 40~80 秒再試，錯開每檔股票的重試時間
                 time.sleep(random.uniform(40, 80))
                 continue
                 
             data = r.json()
             
             if not isinstance(data, list) or len(data) == 0:
-                cell["NewsList"] = [{"id": "0", "title": "今日目前無重大公關新聞", "score": 0, "link": "#", "time": ""}]
+                cell["NewsList"] = [{"id": "0", "title": "近三日目前無重大公關新聞", "score": 0, "link": "#", "time": ""}]
                 cell["max_news_score"] = 0
             else:
                 news = []
@@ -91,14 +92,24 @@ def fetch_news_bg(ticker, cell):
                     try: title_zh = local_translator.translate(headline_en)
                     except: title_zh = headline_en
                         
-                    news_time = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
+                    news_time_tw = datetime.fromtimestamp(item.get('datetime', 0) or 0, pytz.timezone('Asia/Taipei')).strftime('%m/%d %H:%M')
+                    news_dt_us = datetime.fromtimestamp(item.get('datetime', 0) or 0, tz_us)
+                    
+                    # ★ 核心改寫：判斷新聞是否為「今天」，並套用對應的顏色與標籤
+                    if news_dt_us.strftime('%Y-%m-%d') == today_str:
+                        # 當天新聞：加上橘色標籤與醒目樣式
+                        display_title = f'<span style="color: #ff9800; font-weight: bold;">[今日] {title_zh}</span>'
+                    else:
+                        # 歷史新聞：顯示日期，並調淡顏色，作為輔助參考
+                        display_title = f'<span style="color: #aaaaaa;">[{news_dt_us.strftime("%m/%d")}] {title_zh}</span>'
+
                     news_id = str(item.get('id', random.randint(1000, 999999)))
-                    news.append({'id': news_id, 'title': title_zh, 'score': score, 'link': item.get('url', '#'), 'time': news_time})
+                    news.append({'id': news_id, 'title': display_title, 'score': score, 'link': item.get('url', '#'), 'time': news_time_tw})
                 
                 cell["NewsList"] = news
                 cell["max_news_score"] = max_score
             
-            # ★ 成功抓取後，進入「常駐輪詢模式」：隨機等待 5 到 6 分鐘，然後再自動查一次！
+            # 成功抓取後，進入「常駐輪詢模式」：隨機等待 5 到 6 分鐘，然後再自動查一次！
             time.sleep(random.uniform(300, 360))
             
         except Exception as e:
