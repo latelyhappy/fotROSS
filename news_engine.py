@@ -1,4 +1,4 @@
-import requests, random, pytz, time
+import requests, random, pytz
 from datetime import datetime, timedelta
 from deep_translator import GoogleTranslator
 import config
@@ -36,9 +36,6 @@ def calculate_news_score(headline):
 
 def fetch_news_bg(ticker, cell):
     try:
-        # ★ 修復 1 (防暴衝)：讓 80 個並發執行緒隨機休眠 0.1~3.0 秒，打散瞬間請求，大幅降低 429 機率
-        time.sleep(random.uniform(0.1, 3.0))
-        
         api_key = config.FINNHUB_API_KEY
         if not api_key or "請" in api_key:
             cell["NewsList"] = [{"id": "0", "title": "⚠️ 請在 api_key.txt 填寫金鑰", "score": 0, "link": "#", "time": ""}]
@@ -48,10 +45,11 @@ def fetch_news_bg(ticker, cell):
         tz_us = pytz.timezone('US/Eastern')
         now_us = datetime.now(tz_us)
         
-        # 嚴格鎖定當日新聞
+        # ★ 修復點：嚴格鎖定「只抓當天（美東時間）」。如果今天是 3/14，就只顯示 3/14！
         today_str = now_us.strftime('%Y-%m-%d')
-        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={today_str}&to={today_str}&token={api_key}"
         
+        # 將 from 和 to 都設定為 today_str
+        url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from={today_str}&to={today_str}&token={api_key}"
         r = requests.get(url, timeout=8)
         
         if r.status_code == 401:
@@ -60,16 +58,13 @@ def fetch_news_bg(ticker, cell):
             return
             
         if r.status_code == 429:
-            # ★ 修復 2 (自動重試)：先給予短暫提示，15 秒後自動「清空」陣列
-            # 這樣主程式掃描到它時，發現陣列是空的，就會重新幫它抓一次新聞！
-            cell["NewsList"] = [{"id": "0", "title": "⏳ API 滿載，等待自動重試...", "score": 0, "link": "#", "time": ""}]
-            time.sleep(15) 
-            cell["NewsList"] = [] 
+            cell["NewsList"] = [{"id": "0", "title": "⚠️ API 呼叫太快，請稍後再試", "score": 0, "link": "#", "time": ""}]
             return
             
         data = r.json()
         
         if not isinstance(data, list) or len(data) == 0:
+            # 提示字眼改為「今日」
             cell["NewsList"] = [{"id": "0", "title": "今日無重大公關新聞", "score": 0, "link": "#", "time": ""}]
             cell["max_news_score"] = 0
             return
@@ -97,8 +92,5 @@ def fetch_news_bg(ticker, cell):
         cell["max_news_score"] = max_score
         
     except Exception as e:
-        # ★ 網路連線異常時，一樣啟動自動重試機制
-        cell["NewsList"] = [{"id": "0", "title": "⏳ 連線異常，等待自動重試...", "score": 0, "link": "#", "time": ""}]
-        time.sleep(10)
-        cell["NewsList"] = []
+        cell["NewsList"] = [{"id": "0", "title": "Finnhub 連線異常", "score": 0, "link": "#", "time": ""}]
         cell["max_news_score"] = 0
