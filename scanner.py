@@ -50,7 +50,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.5 微幅回調狙擊版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.5 CDN 破甲 + 週末盲區修復版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -60,16 +60,19 @@ def scanner_engine():
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_us = datetime.now(tz_us)
             
+            # ★ 修復點：加入動態時間戳，強制突破 Cloudflare 快取，確保 16:00 準時更新！
+            cache_str = f"?_t={int(time.time())}"
+            
             if 4 <= now_us.hour < 9 or (now_us.hour == 9 and now_us.minute < 30): 
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
+                url = f"https://stockanalysis.com/markets/premarket/gainers/{cache_str}"
             elif 9 <= now_us.hour < 16: 
-                url = "https://stockanalysis.com/markets/gainers/"
+                url = f"https://stockanalysis.com/markets/gainers/{cache_str}"
             else: 
-                url = "https://stockanalysis.com/markets/after-hours/"
+                url = f"https://stockanalysis.com/markets/after-hours/{cache_str}"
 
             r = scraper.get(url, timeout=10)
             if r.status_code == 404: 
-                url = "https://stockanalysis.com/markets/premarket/gainers/"
+                url = f"https://stockanalysis.com/markets/premarket/gainers/{cache_str}"
                 r = scraper.get(url, timeout=10)
             
             if r.status_code == 200:
@@ -83,7 +86,6 @@ def scanner_engine():
 
                 extracted_stocks = []
 
-                # JSON X 光機
                 next_data = soup.find("script", id="__NEXT_DATA__")
                 if next_data:
                     try:
@@ -111,7 +113,6 @@ def scanner_engine():
                                     extracted_stocks.append({'sym': str(sym), 'price': float(price), 'change_str': f"{change}%" if change else "0%", 'vol_raw': parse_vol(vol) if vol else 0.0})
                     except: pass
 
-                # 表格雷達
                 if not extracted_stocks:
                     tables = soup.find_all('table')
                     target_table = None
@@ -161,7 +162,6 @@ def scanner_engine():
                             "up_ticks": 0, 
                             "cum_buy_vol": 0, "cum_sell_vol": 0,
                             "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False,
-                            # ★ 新增：微幅回調與狀態記憶體
                             "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
                             "no_vol_shakeout": False, "bull_trap": False
                         })
@@ -178,7 +178,6 @@ def scanner_engine():
                         last_vol = cell.get("last_vol", vol_raw)
                         curr_vol_delta = vol_raw - last_vol 
                         
-                        # 淨買賣量判定
                         if curr_vol_delta > 0:
                             if p_num > last_price: 
                                 cell["cum_buy_vol"] += curr_vol_delta
@@ -194,32 +193,25 @@ def scanner_engine():
 
                         net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
 
-                        # ==========================================
-                        # ★ 狙擊邏輯 1 & 2：無量洗盤 與 微幅回調狙擊
-                        # ==========================================
                         recent_high = cell.get("recent_high", initial_hod)
                         is_pullback = cell.get("is_pullback", False)
                         sniper_triggered = False
                         no_vol_shakeout = False
 
                         if p_num > recent_high:
-                            if is_pullback: sniper_triggered = True # 突破回調高點，扣板機！
+                            if is_pullback: sniper_triggered = True 
                             is_pullback = False
                             recent_high = p_num
                         elif p_num < last_price:
-                            if curr_vol_delta <= 1500: # 窒息量偵測 (新增單量極小)
+                            if curr_vol_delta <= 1500: 
                                 no_vol_shakeout = True
-                            if p_num >= recent_high * 0.90 and net_vol > 0: # 跌幅不深且主力未出貨
+                            if p_num >= recent_high * 0.90 and net_vol > 0: 
                                 is_pullback = True
 
-                        # ==========================================
-                        # ★ 狙擊邏輯 3：假突破 (Bull Trap) 排雷
-                        # ==========================================
                         bull_trap = False
-                        if is_hod_break and net_vol < 0: # 創高但淨買量為負
+                        if is_hod_break and net_vol < 0: 
                             bull_trap = True
 
-                        # 存回大腦記憶體
                         cell["recent_high"] = recent_high
                         cell["is_pullback"] = is_pullback
                         cell["sniper_triggered"] = sniper_triggered
@@ -251,7 +243,6 @@ def scanner_engine():
                             up_ticks = 0; tick_jump_pct = 0 
                         else: tick_jump_pct = 0
 
-                        # ★ 寫入破高區塊 (包含 Bull Trap 警告)
                         if is_hod_break and (rvol > 0.2 or vol_raw > 50000): 
                             item_hod = item.copy()
                             if bull_trap: item_hod["Streak"] = "⚠️虛漲倒貨"
@@ -262,7 +253,6 @@ def scanner_engine():
                         is_velocity_spike = tick_jump_pct >= 2.0
                         is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                         
-                        # ★ 寫入動能追蹤區塊
                         if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_vol_spike:
                             item_surge = item.copy()
                             if sniper_triggered: item_surge["Streak"] = "🎯精準狙擊"
@@ -296,7 +286,6 @@ def scanner_engine():
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
                             
-                        # ★ 擷取活躍緩漲股 (寫入洗盤與盯盤狀態)
                         if k_cell.get("is_grinder", False):
                             item_grind = k_cell["latest_item"].copy()
                             pos_count = k_cell.get("pos_vol_streak", 0)
