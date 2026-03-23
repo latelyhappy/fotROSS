@@ -50,7 +50,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.6 1分鐘EMA緩漲追蹤版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.7 純血 Ross 視覺優化版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -164,7 +164,6 @@ def scanner_engine():
                             "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False,
                             "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
                             "no_vol_shakeout": False, "bull_trap": False,
-                            # ★ 新增：1 分鐘 EMA 虛擬計時器
                             "grind_1m_start_time": current_t, "grind_1m_start_price": p_num, "grind_1m_count": 0
                         })
                         
@@ -180,7 +179,6 @@ def scanner_engine():
                         last_vol = cell.get("last_vol", vol_raw)
                         curr_vol_delta = vol_raw - last_vol 
                         
-                        # 淨買賣量判定 (保留給假突破與回調過濾使用)
                         if curr_vol_delta > 0:
                             if p_num > last_price: 
                                 cell["cum_buy_vol"] += curr_vol_delta
@@ -193,29 +191,21 @@ def scanner_engine():
 
                         net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
 
-                        # ==========================================
-                        # ★ 全新 1 分鐘 EMA 趨勢判定邏輯 (取代舊的無量緩漲)
-                        # ==========================================
                         if current_t - cell.get("grind_1m_start_time", current_t) >= 60.0:
                             start_p = cell.get("grind_1m_start_price", p_num)
                             if p_num > start_p:
                                 cell["grind_1m_count"] = cell.get("grind_1m_count", 0) + 1
                             elif p_num < start_p:
-                                cell["grind_1m_count"] = 0 # 跌破 1 分鐘前的價格，重置
+                                cell["grind_1m_count"] = 0 
                                 
-                            # 更新計時器與基準價格，準備計算下一個 1 分鐘
                             cell["grind_1m_start_time"] = current_t
                             cell["grind_1m_start_price"] = p_num
 
-                        # 只要連續 2 個 1 分鐘 K 線收高，就列入緩漲追蹤名單
                         if cell["grind_1m_count"] >= 2: 
                             cell["is_grinder"] = True
                         elif cell["grind_1m_count"] == 0:
                             cell["is_grinder"] = False
 
-                        # ==========================================
-                        # 狙擊邏輯 1 & 2：無量洗盤 與 微幅回調狙擊
-                        # ==========================================
                         recent_high = cell.get("recent_high", initial_hod)
                         is_pullback = cell.get("is_pullback", False)
                         sniper_triggered = False
@@ -231,9 +221,6 @@ def scanner_engine():
                             if p_num >= recent_high * 0.90 and net_vol > 0: 
                                 is_pullback = True
 
-                        # ==========================================
-                        # 狙擊邏輯 3：假突破 (Bull Trap) 排雷
-                        # ==========================================
                         bull_trap = False
                         if is_hod_break and net_vol < 0: 
                             bull_trap = True
@@ -264,11 +251,11 @@ def scanner_engine():
                         up_ticks = cell.get("up_ticks", 0) 
                         
                         if p_num > last_price:
-                            up_ticks += 1; tick_jump_pct = ((p_num - last_price) / last_price) * 100
+                            up_ticks += 1
                         elif p_num < last_price:
-                            up_ticks = 0; tick_jump_pct = 0 
-                        else: tick_jump_pct = 0
-
+                            up_ticks = 0
+                            
+                        # 寫入破高區塊
                         if is_hod_break and (rvol > 0.2 or vol_raw > 50000): 
                             item_hod = item.copy()
                             if bull_trap: item_hod["Streak"] = "⚠️虛漲倒貨"
@@ -276,14 +263,13 @@ def scanner_engine():
                             c_hod.append(item_hod)
                             cell["last_act"] = "hod"
 
-                        is_velocity_spike = tick_jump_pct >= 2.0
+                        # 寫入動能區塊 (已移除急噴，純粹留下 Ross 訊號)
                         is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                         
-                        if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_velocity_spike or is_vol_spike:
+                        if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_vol_spike:
                             item_surge = item.copy()
                             if sniper_triggered: item_surge["Streak"] = "🎯精準狙擊"
                             elif bull_trap and is_hod_break: item_surge["Streak"] = "⚠️虛漲倒貨"
-                            elif is_velocity_spike: item_surge["Streak"] = f"🚀急噴+{tick_jump_pct:.1f}%"
                             elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                             else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                             c_surge.append(item_surge)
@@ -312,7 +298,7 @@ def scanner_engine():
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
                             
-                        # ★ 擷取活躍的 EMA 緩漲股
+                        # 擷取緩漲區塊 (合併無量洗盤至回調盯盤，並保留 EMA 標籤)
                         if k_cell.get("is_grinder", False):
                             item_grind = k_cell["latest_item"].copy()
                             
@@ -323,11 +309,10 @@ def scanner_engine():
                             
                             item_grind["GrindCount"] = g_count 
                             
-                            # 優先顯示高階狙擊狀態，若無則顯示持續上漲
+                            if no_vol: is_pb = True # 將無量洗盤視為健康回調
+                            
                             if sniped:
                                 item_grind["Streak"] = "🎯精準狙擊"
-                            elif no_vol:
-                                item_grind["Streak"] = "🛑無量洗盤"
                             elif is_pb:
                                 item_grind["Streak"] = "👀回調盯盤"
                             else:
@@ -339,8 +324,6 @@ def scanner_engine():
                 net_vol_leaders = sorted(net_vol_temp, key=lambda x: abs(x.get("NetVolNum", 0)), reverse=True)[:20]
                 gappers = sorted(t_all, key=lambda x: x["gap_num"], reverse=True)[:20]
                 high_vol = sorted(t_all, key=lambda x: x["rvol_num"], reverse=True)[:20]
-                
-                # 依照 EMA 緩漲維持的「分鐘數」排序，撐越久的在越上面
                 active_grinders = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)[:20]
 
                 config.MASTER_BRAIN.update({
