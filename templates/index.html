@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.7 - 純血視覺進化版</title>
+    <title>ROSS Sniper V215.8 - 終極微觀結構版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -41,10 +41,10 @@
     
     <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-surge" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-green">4. 短線動能追蹤</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-netvol" style="top:590px; left:10px; width:400px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-hod" style="top:10px; left:420px; width:500px; height:430px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-netvol" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:420px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:450px; left:420px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     
     <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
@@ -93,13 +93,15 @@
                 let currentFlash = baseFlashClass; if (item.Streak && rowType !== "grinder") { if (item.Streak.includes('💥')) currentFlash = "flash-yellow"; else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; }
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash;
 
-                // ★ Ross 純血版：整行發光視覺邏輯
+                // ★ Ross 純血版：整行發光視覺邏輯 (包含極度拉伸橘色警告)
                 let trStyle = "";
                 if (item.Streak) {
                     if (item.Streak.includes('🎯')) {
                         trStyle = "background-color: rgba(156, 39, 176, 0.4) !important;"; // 🟪 紫色強光 (精準狙擊)
                     } else if (item.Streak.includes('⚠️')) {
                         trStyle = "background-color: rgba(244, 67, 54, 0.3) !important;";  // 🟥 紅色警告 (虛漲倒貨)
+                    } else if (item.Streak.includes('🔥極度拉伸')) {
+                        trStyle = "background-color: rgba(255, 152, 0, 0.3) !important;";  // 🟧 橘色警告 (防追高)
                     } else if (item.Streak.includes('💥')) {
                         trStyle = "background-color: rgba(255, 193, 7, 0.25) !important;"; // 🟨 黃色亮光 (爆量)
                     } else if (item.Streak.includes('👀')) {
@@ -107,7 +109,6 @@
                     }
                 }
                 
-                // 套用特效到整列容器中
                 html += `<div class="${rowClass}" style="grid-template-columns: ${colTemplate}; ${trStyle}" onclick="loadDetail('${item.Code}')" ondblclick="openTW('${item.Code}')">`;
                 
                 cols.forEach(c => {
@@ -117,20 +118,17 @@
                     else if(c === '浮動股') { let fClass = "text-blue"; if (isMicroFloat) fClass = "text-purple"; else if ((item.FloatStr || "").includes('M') && fVal <= 20.0) fClass = "text-orange"; html += `<div class="${fClass}">${item.FloatStr}</div>`; }
                     else if(c === '量比') html += `<div class="text-gold">${item.RVOL}</div>`; 
                     else if(c === '評分') { let score = item.NewsScore || 0; if(score >= 10) html += `<div><span class="bg-cell-purple">🔥+${score}</span></div>`; else if(score > 0) html += `<div><span class="text-green">+${score}</span></div>`; else if(score < 0) html += `<div><span class="text-red">☠️${score}</span></div>`; else html += `<div><span class="text-blue">-</span></div>`; }
-                    
-                    // 單純化標籤文字顏色，並去除了重複的代碼區塊
                     else if(c === '動能指標') { 
                         let txtColor = "text-green"; 
                         if (item.Streak) { 
                             if(item.Streak.includes('💥') || item.Streak.includes('🛑')) txtColor = "text-gold"; 
-                            else if(item.Streak.includes('🚀') || item.Streak.includes('👀')) txtColor = "text-orange"; 
+                            else if(item.Streak.includes('🔥極度拉伸') || item.Streak.includes('👀')) txtColor = "text-orange"; 
                             else if(item.Streak.includes('🐢') || item.Streak.includes('🔥') || item.Streak.includes('📈')) txtColor = "text-blue"; 
                             else if(item.Streak.includes('⚠️')) txtColor = "text-red"; 
                             else if(item.Streak.includes('🎯')) txtColor = "text-purple"; 
                         } 
                         html += `<div class="${txtColor}" style="font-weight:900;">${item.Streak || ""}</div>`; 
                     }
-                    
                     else if(c === '淨買賣(Net)') { let nv = item.NetVolNum || 0; let nClass = nv > 0 ? "text-green" : (nv < 0 ? "text-red" : "text-blue"); html += `<div class="${nClass}" style="font-weight:900;">${item.NetVolStr}</div>`; }
                     else if(c === '估算買盤') html += `<div class="text-green">${item.BuyVolStr || "0"}</div>`;
                     else if(c === '估算賣盤') html += `<div class="text-red">${item.SellVolStr || "0"}</div>`;
