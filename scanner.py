@@ -50,7 +50,7 @@ def parse_vol(v_str):
 
 def scanner_engine():
     count = 0
-    print("🔥 啟動七星陣列掃描引擎 (V215.7 純血 Ross 視覺優化版)...")
+    print("🔥 啟動七星陣列掃描引擎 (V215.8 終極微觀價量結構版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_us = pytz.timezone('US/Eastern')
     
@@ -164,7 +164,10 @@ def scanner_engine():
                             "pos_vol_streak": 0, "neg_vol_streak": 0, "is_grinder": False,
                             "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
                             "no_vol_shakeout": False, "bull_trap": False,
-                            "grind_1m_start_time": current_t, "grind_1m_start_price": p_num, "grind_1m_count": 0
+                            "grind_1m_start_time": current_t, "grind_1m_start_price": p_num, "grind_1m_count": 0,
+                            # ★ V215.8 新增：微觀結構與極端拉伸變數
+                            "surge_start_price": initial_hod, "max_surge_vol": 0, 
+                            "pullback_start_time": 0, "pullback_min_vol": 9999999, "is_extended": False
                         })
                         
                         is_hod_break = False
@@ -206,30 +209,72 @@ def scanner_engine():
                         elif cell["grind_1m_count"] == 0:
                             cell["is_grinder"] = False
 
+                        # ==========================================
+                        # ★ V215.8 核心：5大防護網與微觀結構辨識
+                        # ==========================================
                         recent_high = cell.get("recent_high", initial_hod)
+                        surge_start_price = cell.get("surge_start_price", initial_hod)
+                        max_surge_vol = cell.get("max_surge_vol", 0)
+                        pullback_start_time = cell.get("pullback_start_time", 0)
+                        pullback_min_vol = cell.get("pullback_min_vol", 9999999)
+                        
                         is_pullback = cell.get("is_pullback", False)
                         sniper_triggered = False
-                        no_vol_shakeout = False
-
-                        if p_num > recent_high:
-                            if is_pullback: sniper_triggered = True 
-                            is_pullback = False
+                        is_extended = False
+                        
+                        # 靈感五：極端乖離 (防追高)，瞬間噴漲 > 15% 未洗盤
+                        if surge_start_price > 0 and (p_num - surge_start_price) / surge_start_price > 0.15:
+                            is_extended = True
+                            
+                        if p_num > recent_high: # 價格創高或推升中
+                            if is_pullback:
+                                # 建議三：量能點火確認 (突破量必須明顯大於洗盤量)
+                                if curr_vol_delta > pullback_min_vol * 1.2: 
+                                    sniper_triggered = True
+                                is_pullback = False
+                                surge_start_price = p_num 
+                                max_surge_vol = curr_vol_delta 
+                            else:
+                                max_surge_vol = max(max_surge_vol, curr_vol_delta)
                             recent_high = p_num
-                        elif p_num < last_price:
-                            if curr_vol_delta <= 1500: 
-                                no_vol_shakeout = True
-                            if p_num >= recent_high * 0.90 and net_vol > 0: 
-                                is_pullback = True
+                            
+                        elif p_num < last_price: # 價格回落洗盤中
+                            swing_size = recent_high - surge_start_price
+                            retrace_ratio = (recent_high - p_num) / swing_size if swing_size > 0 else 0
+                            
+                            # 建議一：1/3 量縮防護 (寬容度設為 40% 以適應 API 頻率)
+                            is_vol_contracted = (curr_vol_delta <= max_surge_vol * 0.4) if max_surge_vol > 0 else True
+                            
+                            # 建議二：50% 黃金分割防守
+                            if retrace_ratio <= 0.50 and net_vol > 0 and is_vol_contracted:
+                                if not is_pullback:
+                                    is_pullback = True
+                                    pullback_start_time = current_t
+                                    pullback_min_vol = curr_vol_delta
+                                else:
+                                    pullback_min_vol = min(pullback_min_vol, curr_vol_delta)
+                            else:
+                                # 若跌破 50% 或是下跌爆量，立刻取消盯盤 (防 A 轉)
+                                if retrace_ratio > 0.50 or curr_vol_delta > max_surge_vol * 0.6:
+                                    is_pullback = False 
+
+                        # 靈感四：時間衰減 (洗盤超過 15 分鐘 = 動能失效)
+                        if is_pullback and (current_t - pullback_start_time > 900):
+                            is_pullback = False
 
                         bull_trap = False
                         if is_hod_break and net_vol < 0: 
                             bull_trap = True
 
                         cell["recent_high"] = recent_high
+                        cell["surge_start_price"] = surge_start_price
+                        cell["max_surge_vol"] = max_surge_vol
+                        cell["pullback_start_time"] = pullback_start_time
+                        cell["pullback_min_vol"] = pullback_min_vol
                         cell["is_pullback"] = is_pullback
                         cell["sniper_triggered"] = sniper_triggered
-                        cell["no_vol_shakeout"] = no_vol_shakeout
                         cell["bull_trap"] = bull_trap
+                        cell["is_extended"] = is_extended
                         
                         item = {
                             "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
@@ -250,10 +295,8 @@ def scanner_engine():
                         last_vol_delta = cell.get("last_vol_delta", 0)
                         up_ticks = cell.get("up_ticks", 0) 
                         
-                        if p_num > last_price:
-                            up_ticks += 1
-                        elif p_num < last_price:
-                            up_ticks = 0
+                        if p_num > last_price: up_ticks += 1
+                        elif p_num < last_price: up_ticks = 0
                             
                         # 寫入破高區塊
                         if is_hod_break and (rvol > 0.2 or vol_raw > 50000): 
@@ -263,13 +306,14 @@ def scanner_engine():
                             c_hod.append(item_hod)
                             cell["last_act"] = "hod"
 
-                        # 寫入動能區塊 (已移除急噴，純粹留下 Ross 訊號)
+                        # 寫入動能區塊 (整合全新拉伸與狙擊訊號)
                         is_vol_spike = (curr_vol_delta > last_vol_delta * 3) and (curr_vol_delta > 20000) and (p_num >= last_price)
                         
-                        if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_vol_spike:
+                        if sniper_triggered or (cell["streak"] >= 2 and is_hod_break) or is_vol_spike or is_extended:
                             item_surge = item.copy()
                             if sniper_triggered: item_surge["Streak"] = "🎯精準狙擊"
                             elif bull_trap and is_hod_break: item_surge["Streak"] = "⚠️虛漲倒貨"
+                            elif is_extended: item_surge["Streak"] = "🔥極度拉伸"
                             elif is_vol_spike: item_surge["Streak"] = f"💥爆量+{format_vol_km(curr_vol_delta)}"
                             else: item_surge["Streak"] = f"⭐破高x{cell['streak']}"
                             c_surge.append(item_surge)
@@ -298,7 +342,6 @@ def scanner_engine():
                         if k_cell["cum_buy_vol"] > 0 or k_cell["cum_sell_vol"] > 0:
                             net_vol_temp.append(k_cell["latest_item"].copy())
                             
-                        # 擷取緩漲區塊 (合併無量洗盤至回調盯盤，並保留 EMA 標籤)
                         if k_cell.get("is_grinder", False):
                             item_grind = k_cell["latest_item"].copy()
                             
@@ -308,15 +351,11 @@ def scanner_engine():
                             g_count = k_cell.get("grind_1m_count", 0)
                             
                             item_grind["GrindCount"] = g_count 
+                            if no_vol: is_pb = True 
                             
-                            if no_vol: is_pb = True # 將無量洗盤視為健康回調
-                            
-                            if sniped:
-                                item_grind["Streak"] = "🎯精準狙擊"
-                            elif is_pb:
-                                item_grind["Streak"] = "👀回調盯盤"
-                            else:
-                                item_grind["Streak"] = f"📈EMA60持續上漲x{g_count}"
+                            if sniped: item_grind["Streak"] = "🎯精準狙擊"
+                            elif is_pb: item_grind["Streak"] = "👀回調盯盤"
+                            else: item_grind["Streak"] = f"📈EMA60持續上漲x{g_count}"
                                 
                             active_grinders.append(item_grind)
                         
