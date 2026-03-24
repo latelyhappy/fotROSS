@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.8 - 終極微觀結構版</title>
+    <title>ROSS Sniper V215.9 - 終極實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -24,7 +24,7 @@
         .row-news { background-color: rgba(56, 117, 191, 0.15); border-left: 2px solid #3875bf; } .row-news:hover { background-color: rgba(56, 117, 191, 0.25); }
         .row-grinder { background-color: rgba(56, 139, 253, 0.1); border-left: 2px solid #388bfd; } .row-grinder:hover { background-color: rgba(56, 139, 253, 0.2); }
         .p-box { background: #161b22; border: 1px solid #30363d; padding: 6px; border-radius: 4px; text-align: center; } .p-val { font-size: 14px; font-weight: bold; color: #fff; margin-top: 2px; font-family: 'Consolas'; }
-        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 10px; background: rgba(13,17,23,0.9); padding: 4px 8px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; }
+        #sys-status { position: fixed; bottom: 10px; left: 10px; color: #8b949e; font-size: 11px; font-weight:bold; background: rgba(13,17,23,0.9); padding: 6px 10px; border: 1px solid #30363d; border-radius: 4px; z-index: 1000; transition: 0.3s; }
         #zoom-controls { position: fixed; top: 10px; right: 10px; background: rgba(13,17,23,0.9); padding: 5px; border: 1px solid #30363d; border-radius: 4px; z-index: 2000; }
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; cursor: pointer; padding: 4px 8px; border-radius: 3px; font-weight: bold; margin-left: 2px; } #zoom-controls button:hover { background: #30363d; }
         @keyframes flashGreen { 0% { background-color: rgba(63, 185, 80, 0.4); } 100% { background-color: transparent; } } @keyframes flashRed { 0% { background-color: rgba(255, 123, 114, 0.4); } 100% { background-color: transparent; } } @keyframes flashYellow { 0% { background-color: rgba(210, 153, 34, 0.4); } 100% { background-color: transparent; } } @keyframes flashOrange { 0% { background-color: rgba(255, 123, 0, 0.4); } 100% { background-color: transparent; } }
@@ -49,6 +49,7 @@
     <div class="window" id="win-news-score" style="top:10px; left:930px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-grind" style="top:300px; left:930px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-detail" style="top:590px; left:930px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
+    
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
     <script>
@@ -57,12 +58,15 @@
         let isEngineRunning = localStorage.getItem('ross_engine_state') === null ? true : localStorage.getItem('ross_engine_state') === 'true';
         let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
+        // ★ 新增：心跳監測計時器
+        let lastSuccessfulFetchTime = Date.now();
+
         window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
         window.toggleStar = function(id, event) { event.stopPropagation(); if(starNewsMap[id]) delete starNewsMap[id]; else starNewsMap[id] = true; localStorage.setItem('ross_news_star', JSON.stringify(starNewsMap)); let starEl = document.getElementById('star-icon-' + id); if(starEl) starEl.innerText = starNewsMap[id] ? '⭐' : '☆'; };
         function toggleGlobalLock() { isWindowLocked = !isWindowLocked; const btn = document.getElementById('lock-btn'); if(isWindowLocked) { btn.innerText = '🔒 視窗鎖定'; btn.style.background = '#a50e0e'; } else { btn.innerText = '🔓 視窗解鎖'; btn.style.background = '#21262d'; } }
         
         function toggleEngineRun() { isEngineRunning = !isEngineRunning; localStorage.setItem('ross_engine_state', isEngineRunning); updateEngineBtnUI(); }
-        function updateEngineBtnUI() { const btn = document.getElementById('engine-btn'); if(!isEngineRunning) { btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; document.getElementById('sys-status').innerText = '⏸️ 系統已完全暫停'; } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; document.getElementById('sys-status').innerText = '🔄 系統恢復掃描中...'; } }
+        function updateEngineBtnUI() { const btn = document.getElementById('engine-btn'); if(!isEngineRunning) { btn.innerText = '▶️ 啟動掃描'; btn.style.background = '#137333'; document.getElementById('sys-status').innerText = '⏸️ 系統已手動暫停'; } else { btn.innerText = '⏹️ 停止掃描'; btn.style.background = '#21262d'; document.getElementById('sys-status').innerText = '🔄 系統恢復掃描中...'; lastSuccessfulFetchTime = Date.now(); } }
 
         function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('ross_layout', JSON.stringify(layout)); }
         function changeZoom(delta) { currentZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta)); document.body.style.zoom = currentZoom; localStorage.setItem('ross_zoom', currentZoom); }
@@ -93,11 +97,11 @@
                 let currentFlash = baseFlashClass; if (item.Streak && rowType !== "grinder") { if (item.Streak.includes('💥')) currentFlash = "flash-yellow"; else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; }
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash;
 
-                // ★ Ross 純血版：整行發光視覺邏輯 (包含極度拉伸橘色警告)
+                // ★ Ross 純血版：整行發光視覺邏輯 (包含新增的⚡與🎯符號判讀)
                 let trStyle = "";
                 if (item.Streak) {
-                    if (item.Streak.includes('🎯')) {
-                        trStyle = "background-color: rgba(156, 39, 176, 0.4) !important;"; // 🟪 紫色強光 (精準狙擊)
+                    if (item.Streak.includes('🎯') || item.Streak.includes('⚡')) {
+                        trStyle = "background-color: rgba(156, 39, 176, 0.4) !important;"; // 🟪 紫色強光 (精準狙擊/9EMA級別)
                     } else if (item.Streak.includes('⚠️')) {
                         trStyle = "background-color: rgba(244, 67, 54, 0.3) !important;";  // 🟥 紅色警告 (虛漲倒貨)
                     } else if (item.Streak.includes('🔥極度拉伸')) {
@@ -125,7 +129,8 @@
                             else if(item.Streak.includes('🔥極度拉伸') || item.Streak.includes('👀')) txtColor = "text-orange"; 
                             else if(item.Streak.includes('🐢') || item.Streak.includes('🔥') || item.Streak.includes('📈')) txtColor = "text-blue"; 
                             else if(item.Streak.includes('⚠️')) txtColor = "text-red"; 
-                            else if(item.Streak.includes('🎯')) txtColor = "text-purple"; 
+                            // 包含 🎯 或 ⚡ 都顯示為紫色
+                            else if(item.Streak.includes('🎯') || item.Streak.includes('⚡')) txtColor = "text-purple"; 
                         } 
                         html += `<div class="${txtColor}" style="font-weight:900;">${item.Streak || ""}</div>`; 
                     }
@@ -140,8 +145,17 @@
         async function refresh() {
             if(!isEngineRunning) return; 
             try {
-                const res = await fetch('/data?t=' + Date.now()); const data = await res.json(); data.details.last_update = data.last_update;
+                const res = await fetch('/data?t=' + Date.now()); 
+                const data = await res.json(); 
+                
+                // 成功抓取到資料，更新時間與計時器
+                data.details.last_update = data.last_update;
+                lastSuccessfulFetchTime = Date.now(); 
+                
                 document.getElementById('sys-status').innerText = '✅ 更新時間(TW): ' + data.last_update + ' | 總掃描: ' + data.scan_count;
+                document.getElementById('sys-status').style.backgroundColor = 'rgba(13,17,23,0.9)';
+                document.getElementById('sys-status').style.color = '#8b949e';
+
                 document.getElementById('gap-list').innerHTML = buildTable(data.gappers, data.details, ['代碼','價格','跳空%','交易量','浮動股','量比'], '0.8fr 1fr 1fr 1.2fr 1fr 0.8fr');
                 document.getElementById('vol-list').innerHTML = buildTable(data.high_vol, data.details, ['代碼','價格','漲幅%','量比','交易量','浮動股'], '0.8fr 1fr 1fr 1fr 1.2fr 1fr');
                 document.getElementById('surge-list').innerHTML = buildTable(data.surge, data.details, ['時間','代碼','價格','動能指標','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1.2fr 0.8fr', true, 'flash-green');
@@ -149,7 +163,9 @@
                 document.getElementById('netvol-list').innerHTML = buildTable(data.net_vol_leaders, data.details, ['代碼','價格','淨買賣(Net)','估算買盤','估算賣盤','量比'], '0.8fr 1fr 1.2fr 1.2fr 1.2fr 0.8fr', false, 'flash-green');
                 document.getElementById('news-score-list').innerHTML = buildTable(data.news_leaders, data.details, ['代碼','價格','漲幅%','評分','交易量','浮動股'], '0.8fr 1fr 1fr 0.8fr 1.2fr 1fr');
                 document.getElementById('grind-list').innerHTML = buildTable(data.grinders, data.details, ['時間','代碼','價格','動能指標','持續上漲次數','交易量','量比'], '1fr 0.8fr 1fr 1.2fr 1fr 1.2fr 0.8fr', true, 'flash-green', "grinder");
-            } catch(e) {}
+            } catch(e) {
+                console.log("連線失敗等待重試中...");
+            }
         }
 
         async function loadDetail(sym) {
@@ -167,7 +183,19 @@
             } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
+
+        // 啟動資料刷新迴圈
         setInterval(refresh, 2000);
+
+        // ★ 新增：每 1 秒檢查一次資料是否延遲的「心跳監測器」
+        setInterval(() => {
+            const statusEl = document.getElementById('sys-status');
+            if (isEngineRunning && (Date.now() - lastSuccessfulFetchTime > 15000)) {
+                statusEl.innerHTML = '🟥 ⚠️ 連線異常 / 數據已停滯超過 15 秒！請檢查網路或爬蟲狀態';
+                statusEl.style.backgroundColor = 'rgba(244, 67, 54, 0.8)';
+                statusEl.style.color = '#fff';
+            }
+        }, 1000);
     </script>
 </body>
 </html>
