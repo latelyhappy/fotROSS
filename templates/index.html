@@ -58,7 +58,7 @@
         let isEngineRunning = localStorage.getItem('ross_engine_state') === null ? true : localStorage.getItem('ross_engine_state') === 'true';
         let readNewsMap = JSON.parse(localStorage.getItem('ross_news_read') || '{}'); let starNewsMap = JSON.parse(localStorage.getItem('ross_news_star') || '{}');
 
-        // ★ 新增：心跳監測計時器
+        // ★ 心跳監測計時器
         let lastSuccessfulFetchTime = Date.now();
 
         window.markRead = function(id, url) { readNewsMap[id] = true; localStorage.setItem('ross_news_read', JSON.stringify(readNewsMap)); let linkEl = document.getElementById('news-link-' + id); if(linkEl) linkEl.style.color = '#6e7681'; if(url !== '#') window.open(url, '_blank'); refresh(); };
@@ -97,19 +97,18 @@
                 let currentFlash = baseFlashClass; if (item.Streak && rowType !== "grinder") { if (item.Streak.includes('💥')) currentFlash = "flash-yellow"; else if (item.Streak.includes('🚀')) currentFlash = "flash-orange"; }
                 if (showTime && item.Time === detailsData.last_update) rowClass += " " + currentFlash;
 
-                // ★ Ross 純血版：整行發光視覺邏輯 (包含新增的⚡與🎯符號判讀)
                 let trStyle = "";
                 if (item.Streak) {
                     if (item.Streak.includes('🎯') || item.Streak.includes('⚡')) {
-                        trStyle = "background-color: rgba(156, 39, 176, 0.4) !important;"; // 🟪 紫色強光 (精準狙擊/9EMA級別)
+                        trStyle = "background-color: rgba(156, 39, 176, 0.4) !important;"; 
                     } else if (item.Streak.includes('⚠️')) {
-                        trStyle = "background-color: rgba(244, 67, 54, 0.3) !important;";  // 🟥 紅色警告 (虛漲倒貨)
+                        trStyle = "background-color: rgba(244, 67, 54, 0.3) !important;";  
                     } else if (item.Streak.includes('🔥極度拉伸')) {
-                        trStyle = "background-color: rgba(255, 152, 0, 0.3) !important;";  // 🟧 橘色警告 (防追高)
+                        trStyle = "background-color: rgba(255, 152, 0, 0.3) !important;";  
                     } else if (item.Streak.includes('💥')) {
-                        trStyle = "background-color: rgba(255, 193, 7, 0.25) !important;"; // 🟨 黃色亮光 (爆量)
+                        trStyle = "background-color: rgba(255, 193, 7, 0.25) !important;"; 
                     } else if (item.Streak.includes('👀')) {
-                        trStyle = "background-color: rgba(33, 150, 243, 0.25) !important;"; // 🟦 藍色盯盤 (無量洗盤/回調)
+                        trStyle = "background-color: rgba(33, 150, 243, 0.25) !important;"; 
                     }
                 }
                 
@@ -129,7 +128,6 @@
                             else if(item.Streak.includes('🔥極度拉伸') || item.Streak.includes('👀')) txtColor = "text-orange"; 
                             else if(item.Streak.includes('🐢') || item.Streak.includes('🔥') || item.Streak.includes('📈')) txtColor = "text-blue"; 
                             else if(item.Streak.includes('⚠️')) txtColor = "text-red"; 
-                            // 包含 🎯 或 ⚡ 都顯示為紫色
                             else if(item.Streak.includes('🎯') || item.Streak.includes('⚡')) txtColor = "text-purple"; 
                         } 
                         html += `<div class="${txtColor}" style="font-weight:900;">${item.Streak || ""}</div>`; 
@@ -148,7 +146,6 @@
                 const res = await fetch('/data?t=' + Date.now()); 
                 const data = await res.json(); 
                 
-                // 成功抓取到資料，更新時間與計時器
                 data.details.last_update = data.last_update;
                 lastSuccessfulFetchTime = Date.now(); 
                 
@@ -184,10 +181,10 @@
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        // 啟動資料刷新迴圈
-        setInterval(refresh, 2000);
+        // ★ 效能優化：前端降速至每 5 秒刷新一次 (5000 毫秒)
+        setInterval(refresh, 5000);
 
-        // ★ 新增：每 1 秒檢查一次資料是否延遲的「心跳監測器」
+        // 每 1 秒檢查一次資料是否延遲的「心跳監測器」
         setInterval(() => {
             const statusEl = document.getElementById('sys-status');
             if (isEngineRunning && (Date.now() - lastSuccessfulFetchTime > 15000)) {
