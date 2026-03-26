@@ -137,7 +137,7 @@ def scanner_engine():
             symbols_to_track = combined_symbols
             
             # 使用 yfinance 抓取「包含盤前」的最新 1 分鐘 K 線
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, show_errors=False)
+            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False)
             
             extracted_stocks = []
             
