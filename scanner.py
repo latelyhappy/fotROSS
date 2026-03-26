@@ -1,4 +1,4 @@
-import time, threading, os
+import time, threading, requests, os
 from datetime import datetime
 import pytz
 import yfinance as yf
@@ -7,24 +7,47 @@ import pandas as pd
 import config
 from news_engine import fetch_news_bg
 
-WATCHLIST_FILE = "watchlist.txt"
+# ==========================================
+# 網路請求設定 (填入您的 Webull VIP 通行證)
+# ==========================================
+scraper = requests.Session()
+scraper.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Origin': 'https://app.webull.com',
+    'Referer': 'https://app.webull.com/',
+    # ⚠️ 請將以下兩行替換成您剛剛 F12 抓到的真實代碼
+    'did': '請貼上您的_did', 
+    'access_token': '請貼上您的_access_token' 
+})
 
-# 確保監聽檔案存在
+WATCHLIST_FILE = "watchlist.txt"
+auto_hot_symbols = [] # 存放 Webull 自動抓的名單
+
+# 確保手動監聽檔案存在
 if not os.path.exists(WATCHLIST_FILE):
     with open(WATCHLIST_FILE, "w") as f:
-        f.write("AAPL\nTSLA\n") # 預設放幾個代碼測試
+        f.write("")
 
-def get_watchlist():
-    """讀取文字檔中的股票代碼"""
+def get_manual_symbols():
+    """讀取網頁手動輸入的代碼"""
     try:
         with open(WATCHLIST_FILE, "r") as f:
-            lines = f.readlines()
-            # 清除空白與換行，並轉大寫
-            symbols = [line.strip().upper() for line in lines if line.strip()]
-            return symbols
-    except Exception as e:
-        print(f"讀取 watchlist 失敗: {e}")
+            return [line.strip().upper() for line in f.readlines() if line.strip()]
+    except:
         return []
+
+# ==========================================
+# 輔助函式：判斷美國市場狀態 & 取得 Float
+# ==========================================
+def get_market_rank_type():
+    tz_ny = pytz.timezone('America/New_York')
+    now_ny = datetime.now(tz_ny)
+    current_time = now_ny.time()
+    
+    if current_time < datetime.strptime("09:30", "%H:%M").time(): return "2", "盤前時段"
+    elif current_time > datetime.strptime("16:00", "%H:%M").time(): return "1", "盤後時段"
+    else: return "0", "一般盤中"
 
 def fetch_static_bg(ticker):
     try:
@@ -48,35 +71,72 @@ def format_vol_km(v_float):
     else: return f"{int(v_float)}"
 
 # ==========================================
-# ★ 核心模組：Yahoo 高頻狙擊鏡 (專心盯盤)
+# ★ 核心模組 1：Webull 地下雷達 (自動破解版)
+# ==========================================
+def fetch_webull_gainers():
+    global auto_hot_symbols
+    tz_tw = pytz.timezone('Asia/Taipei')
+    
+    while True:
+        try:
+            rank_type, market_status = get_market_rank_type()
+            webull_url = "https://quoteapi.webullfinance.com/api/market/v1/market/ranking/gainers"
+            params = {
+                "regionId": "6", "secType": "12", "rankType": rank_type, 
+                "pageIndex": "1", "pageSize": "30"
+            }
+            
+            res = scraper.get(webull_url, params=params, timeout=10)
+            
+            if res.status_code == 200:
+                data = res.json()
+                symbols = [item.get('ticker', {}).get('symbol') for item in data.get('data', [])]
+                symbols = [s for s in symbols if s and '-' not in s]
+                
+                if symbols:
+                    auto_hot_symbols = symbols
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull {market_status} 雷達更新成功！鎖定: {symbols[:5]}...")
+            else:
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ❌ Webull API 異常: {res.status_code} (請檢查 Token 是否過期)")
+                
+        except Exception as e:
+            pass # 保持安靜，等待下一次迴圈
+            
+        time.sleep(30)
+
+# ==========================================
+# ★ 核心模組 2：Yahoo 高頻狙擊鏡 (融合名單)
 # ==========================================
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動【半自動狙擊引擎】! 請在 watchlist.txt 中輸入目標代碼...")
     
-    last_symbols = []
+    print("🔥 啟動 V4.0 究極版 (自動 VIP 雷達 + 網頁手動狙擊)...")
     
+    # 啟動 Webull 雷達線程
+    threading.Thread(target=fetch_webull_gainers, daemon=True).start()
+    
+    wait_count = 0
     while True:
         try:
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # 1. 讀取肉眼找出的獵物名單
-            current_hot_symbols = get_watchlist()
+            # 🔥 究極融合：將 Webull 自動抓的 + 網頁手動輸入的代碼合在一起 (去重複)
+            manual_symbols = get_manual_symbols()
+            combined_symbols = list(set(auto_hot_symbols + manual_symbols))
             
-            if not current_hot_symbols:
-                print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中，請在 {WATCHLIST_FILE} 輸入代碼...")
-                time.sleep(3)
+            if not combined_symbols:
+                if wait_count % 5 == 0:
+                    print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中，等待 Webull 自動抓取或您手動輸入目標...")
+                wait_count += 1
+                time.sleep(2)
                 continue
                 
-            if current_hot_symbols != last_symbols:
-                print(f"[{current_time_tw}] 🎯 鎖定新目標清單: {current_hot_symbols}")
-                last_symbols = current_hot_symbols
-
-            symbols_to_track = list(current_hot_symbols)
+            wait_count = 0
+            symbols_to_track = combined_symbols
             
-            # 2. 啟動 Yahoo K 線精準掃描 (包含盤前 prepost=True)
+            # 使用 yfinance 抓取「包含盤前」的最新 1 分鐘 K 線
             data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, show_errors=False)
             
             extracted_stocks = []
@@ -97,7 +157,7 @@ def scanner_engine():
                             extracted_stocks.append({
                                 'sym': sym, 
                                 'price': price, 
-                                'change_str': "手動鎖定", 
+                                'change_str': "自動/手動", 
                                 'vol_raw': vol,
                                 'rvol_tw': vol / 50000.0
                             })
@@ -107,7 +167,7 @@ def scanner_engine():
             t_all, c_hod, c_surge, c_grind = [], [], [], []
             current_t = time.time()
             
-            # 3. 微觀運算與燈號判定 (Ross Cameron 邏輯)
+            # --- 進入 Ross Cameron 微觀運算邏輯 ---
             for data in extracted_stocks:
                 sym = data['sym']
                 p_num = data['price']
@@ -157,6 +217,8 @@ def scanner_engine():
                     if is_pullback:
                         swing_size = recent_high - surge_start_price
                         pb_low = cell.get("pullback_low", p_num)
+                        retrace_ratio = (recent_high - pb_low) / swing_size if swing_size > 0 else 0
+                        
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
                             cell["surge_wave_count"] = cell.get("surge_wave_count", 0) + 1
@@ -182,6 +244,9 @@ def scanner_engine():
                     else:
                         is_pullback = False 
 
+                bull_trap = False
+                if is_hod_break and net_vol < 0: bull_trap = True
+
                 cell["recent_high"] = recent_high
                 cell["surge_start_price"] = surge_start_price
                 cell["max_surge_vol"] = max_surge_vol
@@ -194,7 +259,7 @@ def scanner_engine():
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "Change": change_str, "Volume": formatted_volume, 
-                    "RVOL": f"{rvol:.1f}x", "Gap": "0.0%", "Drop": "0.0%",
+                    "RVOL": f"{rvol:.1f}x", "Gap": "0.0%", "Drop": f"{((p_num - cell['HOD'])/cell['HOD']*100):.1f}%" if cell['HOD']>0 else "0.0%",
                     "FloatStr": float_str, "Streak": f"x{cell['streak']}", 
                     "gap_num": 0, "rvol_num": rvol, "f_num": f,
                     "NetVolNum": net_vol,
