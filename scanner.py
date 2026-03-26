@@ -54,7 +54,7 @@ def scanner_engine():
     print("🔥 啟動 TW 內部 API 直連引擎 (零延遲混血版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     
-    # 這是我們要傳給 TW 伺服器的「地下指令」
+# 這是我們要傳給 TW 伺服器的「地下指令」
     tw_url = "https://scanner.tradingview.com/america/scan"
     tw_payload = {
         "filter": [
@@ -64,8 +64,8 @@ def scanner_engine():
         "options": {"lang": "en"},
         "markets": ["america"],
         "symbols": {"query": {"types": []}, "tickers": []},
-        # 我們直接向 TW 要求回傳：代碼、價格、漲跌幅、成交量、相對成交量
-        "columns": ["name", "close", "change", "volume", "RelativeVolumeAtTime"],
+        # ★ 修正此處：改用 TW 官方認可的相對成交量欄位名稱 relative_volume_10d_calc
+        "columns": ["name", "close", "change", "volume", "relative_volume_10d_calc"],
         "sort": {"sortBy": "change", "sortOrder": "desc"},
         "range": [0, 100]
     }
