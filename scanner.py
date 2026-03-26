@@ -3,26 +3,13 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 import pandas as pd
+from playwright.sync_api import sync_playwright
 
 import config
 from news_engine import fetch_news_bg
 
-# ==========================================
-# 網路請求設定 (填入您的 Webull VIP 通行證)
-# ==========================================
-scraper = requests.Session()
-scraper.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Origin': 'https://app.webull.com',
-    'Referer': 'https://app.webull.com/',
-    # ⚠️ 請將以下兩行替換成您剛剛 F12 抓到的真實代碼
-    'did': '請貼上您的_did', 
-    'access_token': '請貼上您的_access_token' 
-})
-
 WATCHLIST_FILE = "watchlist.txt"
-auto_hot_symbols = [] # 存放 Webull 自動抓的名單
+auto_hot_symbols = [] # 存放隱形瀏覽器抓來的名單
 
 # 確保手動監聽檔案存在
 if not os.path.exists(WATCHLIST_FILE):
@@ -30,16 +17,12 @@ if not os.path.exists(WATCHLIST_FILE):
         f.write("")
 
 def get_manual_symbols():
-    """讀取網頁手動輸入的代碼"""
     try:
         with open(WATCHLIST_FILE, "r") as f:
             return [line.strip().upper() for line in f.readlines() if line.strip()]
     except:
         return []
 
-# ==========================================
-# 輔助函式：判斷美國市場狀態 & 取得 Float
-# ==========================================
 def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
     now_ny = datetime.now(tz_ny)
@@ -71,7 +54,7 @@ def format_vol_km(v_float):
     else: return f"{int(v_float)}"
 
 # ==========================================
-# ★ 核心模組 1：Webull 地下雷達 (自動破解版)
+# ★ 核心模組 1：隱形瀏覽器潛入系統 (Playwright)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols
@@ -80,27 +63,47 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            webull_url = "https://quoteapi.webullfinance.com/api/market/v1/market/ranking/gainers"
-            params = {
-                "regionId": "6", "secType": "12", "rankType": rank_type, 
-                "pageIndex": "1", "pageSize": "30"
-            }
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ 啟動隱形瀏覽器潛入 Webull ({market_status})...")
             
-            res = scraper.get(webull_url, params=params, timeout=10)
-            
-            if res.status_code == 200:
-                data = res.json()
-                symbols = [item.get('ticker', {}).get('symbol') for item in data.get('data', [])]
-                symbols = [s for s in symbols if s and '-' not in s]
+            with sync_playwright() as p:
+                # 啟動隱形 Chrome，--no-sandbox 是雲端主機必備參數
+                browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+                context = browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                page = context.new_page()
+                
+                # 1. 戰術欺敵：前往首頁獲取通行證
+                page.goto("https://app.webull.com/", timeout=30000)
+                time.sleep(3) 
+                
+                # 2. 鎖定地下 API
+                api_url = f"https://quoteapi.webullfinance.com/api/market/v1/market/ranking/gainers?regionId=6&secType=12&rankType={rank_type}&pageIndex=1&pageSize=30"
+                
+                # 3. 攔截數據
+                js_code = f"""
+                async () => {{
+                    const response = await fetch('{api_url}');
+                    return await response.json();
+                }}
+                """
+                data = page.evaluate(js_code)
+                browser.close()
+                
+                symbols = []
+                for item in data.get('data', []):
+                    sym = item.get('ticker', {}).get('symbol')
+                    if sym and '-' not in sym: 
+                        symbols.append(sym)
                 
                 if symbols:
                     auto_hot_symbols = symbols
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull {market_status} 雷達更新成功！鎖定: {symbols[:5]}...")
-            else:
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ❌ Webull API 異常: {res.status_code} (請檢查 Token 是否過期)")
-                
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ 隱形瀏覽器攔截成功！鎖定目標: {symbols[:5]}...")
+                else:
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⚠️ 攔截成功，但目前無波動名單。")
+                    
         except Exception as e:
-            pass # 保持安靜，等待下一次迴圈
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 隱形瀏覽器遭遇阻礙: {e}")
             
         time.sleep(30)
 
@@ -110,10 +113,8 @@ def fetch_webull_gainers():
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
+    print("🔥 啟動 V5.0 隱形戰艦版 (Playwright 自動雷達 + 手動狙擊)...")
     
-    print("🔥 啟動 V4.0 究極版 (自動 VIP 雷達 + 網頁手動狙擊)...")
-    
-    # 啟動 Webull 雷達線程
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
     wait_count = 0
@@ -122,13 +123,12 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # 🔥 究極融合：將 Webull 自動抓的 + 網頁手動輸入的代碼合在一起 (去重複)
             manual_symbols = get_manual_symbols()
             combined_symbols = list(set(auto_hot_symbols + manual_symbols))
             
             if not combined_symbols:
                 if wait_count % 5 == 0:
-                    print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中，等待 Webull 自動抓取或您手動輸入目標...")
+                    print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中，等待隱形瀏覽器回傳目標...")
                 wait_count += 1
                 time.sleep(2)
                 continue
@@ -136,11 +136,10 @@ def scanner_engine():
             wait_count = 0
             symbols_to_track = combined_symbols
             
-            # 使用 yfinance 抓取「包含盤前」的最新 1 分鐘 K 線
+            # 使用 yfinance 抓取 1 分鐘 K 線 (已移除 show_errors=False 避免報錯)
             data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False)
             
             extracted_stocks = []
-            
             if not data_df.empty:
                 is_single = len(symbols_to_track) == 1
                 for sym in symbols_to_track:
@@ -152,14 +151,10 @@ def scanner_engine():
                             
                         price = float(latest_row['Close'])
                         vol = float(latest_row['Volume'])
-                        
                         if pd.notna(price) and price > 0:
                             extracted_stocks.append({
-                                'sym': sym, 
-                                'price': price, 
-                                'change_str': "自動/手動", 
-                                'vol_raw': vol,
-                                'rvol_tw': vol / 50000.0
+                                'sym': sym, 'price': price, 'change_str': "自動/手動", 
+                                'vol_raw': vol, 'rvol_tw': vol / 50000.0
                             })
                     except:
                         continue
@@ -167,7 +162,6 @@ def scanner_engine():
             t_all, c_hod, c_surge, c_grind = [], [], [], []
             current_t = time.time()
             
-            # --- 進入 Ross Cameron 微觀運算邏輯 ---
             for data in extracted_stocks:
                 sym = data['sym']
                 p_num = data['price']
@@ -217,8 +211,6 @@ def scanner_engine():
                     if is_pullback:
                         swing_size = recent_high - surge_start_price
                         pb_low = cell.get("pullback_low", p_num)
-                        retrace_ratio = (recent_high - pb_low) / swing_size if swing_size > 0 else 0
-                        
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
                             cell["surge_wave_count"] = cell.get("surge_wave_count", 0) + 1

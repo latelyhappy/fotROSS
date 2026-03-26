@@ -1,10 +1,8 @@
 flask
-flask-cors
-yfinance
-deep-translator
-python-dateutil
-lxml
-beautifulsoup4
 requests
+yfinance
+pandas
 pytz
-cloudscraper
+playwright
+beautifulsoup4
+lxml
