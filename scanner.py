@@ -71,7 +71,7 @@ def fetch_webull_gainers():
         try:
             rank_type, market_status = get_market_rank_type()
             # 這是 Webull 官方網頁版在用的隱藏 API
-            webull_url = "https://quoteapi.webullfinance.com/api/market/v1/market/ranking/gainers"
+            webull_url = "https://quotes-gw.webullfintech.com/api/market/v1/market/ranking/gainers"
             params = {
                 "regionId": "6",       # 美股
                 "secType": "12",       # 股票
