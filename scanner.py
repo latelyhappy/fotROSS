@@ -54,19 +54,19 @@ def scanner_engine():
     print("🔥 啟動 TW 內部 API 直連引擎 (零延遲混血版)...")
     tz_tw = pytz.timezone('Asia/Taipei')
     
-# 這是我們要傳給 TW 伺服器的「地下指令」
+# 這是我們要傳給 TW 伺服器的「盤前專用」地下指令
     tw_url = "https://scanner.tradingview.com/america/scan"
     tw_payload = {
         "filter": [
-            {"left": "close", "operation": "in_range", "right": [0.5, 50]},
+            {"left": "premarket_close", "operation": "in_range", "right": [0.5, 50]}, # 盤前價格在 0.5 ~ 50 之間
             {"left": "type", "operation": "in_range", "right": ["stock", "dr"]}
         ],
         "options": {"lang": "en"},
         "markets": ["america"],
         "symbols": {"query": {"types": []}, "tickers": []},
-        # ★ 修正此處：改用 TW 官方認可的相對成交量欄位名稱 relative_volume_10d_calc
-        "columns": ["name", "close", "change", "volume", "relative_volume_10d_calc"],
-        "sort": {"sortBy": "change", "sortOrder": "desc"},
+        # ★ 換上盤前專屬菜單！
+        "columns": ["name", "premarket_close", "premarket_change", "premarket_volume", "relative_volume_10d_calc"],
+        "sort": {"sortBy": "premarket_change", "sortOrder": "desc"}, # 依照盤前漲幅排序
         "range": [0, 100]
     }
 
@@ -85,11 +85,12 @@ def scanner_engine():
                     # TW 格式: {"d": ["NASDAQ:AAPL", 150.0, 2.5, 50000000, 1.2]}
                     cols = item.get('d', [])
                     if len(cols) >= 5:
+                        # 在 extracted_stocks.append 之前的那段解析，直接無縫接軌盤前數據：
                         raw_sym = cols[0]
-                        sym = raw_sym.split(':')[1] if ':' in raw_sym else raw_sym # 去除交易所前綴
-                        price = float(cols[1])
-                        change_pct = float(cols[2])
-                        vol = float(cols[3])
+                        sym = raw_sym.split(':')[1] if ':' in raw_sym else raw_sym
+                        price = float(cols[1])      # 現在 cols[1] 是 premarket_close
+                        change_pct = float(cols[2]) # 現在 cols[2] 是 premarket_change
+                        vol = float(cols[3])        # 現在 cols[3] 是 premarket_volume
                         rvol_tw = float(cols[4]) if cols[4] is not None else 1.0
                         
                         extracted_stocks.append({
