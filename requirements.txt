@@ -6,3 +6,4 @@ pytz
 playwright
 beautifulsoup4
 lxml
+deep-translator
