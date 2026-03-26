@@ -8,17 +8,18 @@ import config
 from news_engine import fetch_news_bg
 
 # ==========================================
-# 網路請求設定 (偽裝成一般瀏覽器)
+# 網路請求設定 (強化偽裝，避免被 Webull 防火牆阻擋)
 # ==========================================
 scraper = requests.Session()
 scraper.headers.update({
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Origin': 'https://app.webull.com',
+    'Referer': 'https://app.webull.com/'
 })
 
 # 存放從 Webull 抓到的熱門代碼名單
 current_hot_symbols = []
-last_webull_fetch = 0
 
 # ==========================================
 # 輔助函式：判斷美國市場狀態 & 取得 Float
@@ -60,25 +61,26 @@ def format_vol_km(v_float):
     else: return f"{int(v_float)}"
 
 # ==========================================
-# ★ 核心模組 1：Webull 地下雷達 (負責找代碼)
+# ★ 核心模組 1：Webull 地下雷達 (負責找代碼，附帶探照燈回報)
 # ==========================================
 def fetch_webull_gainers():
-    global current_hot_symbols, last_webull_fetch
+    global current_hot_symbols
     tz_tw = pytz.timezone('Asia/Taipei')
     
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            # Webull 漲幅榜 API 端點
-            webull_url = "https://quoteapi.webullbroker.com/api/market/v1/market/ranking/gainers"
+            # 這是 Webull 官方網頁版在用的隱藏 API
+            webull_url = "https://quoteapi.webullfinance.com/api/market/v1/market/ranking/gainers"
             params = {
                 "regionId": "6",       # 美股
                 "secType": "12",       # 股票
                 "rankType": rank_type, # 2=盤前, 0=盤中
                 "pageIndex": "1",
-                "pageSize": "30"       # 抓取前 30 名
+                "pageSize": "30"       # 抓取前 30 名妖股
             }
             
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 📡 嘗試連線 Webull API ({market_status})...")
             res = scraper.get(webull_url, params=params, timeout=10)
             
             if res.status_code == 200:
@@ -87,21 +89,24 @@ def fetch_webull_gainers():
                 for item in data.get('data', []):
                     # 提取股票代碼
                     sym = item.get('ticker', {}).get('symbol')
-                    if sym and '-' not in sym: # 排除奇怪的優先股
+                    # 排除帶有橫槓的奇怪特別股 (如 BRK-B)
+                    if sym and '-' not in sym: 
                         symbols.append(sym)
                 
                 if symbols:
                     current_hot_symbols = symbols
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 📡 Webull {market_status} 雷達更新成功！鎖定 {len(symbols)} 檔目標。")
-            
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 雷達更新成功！鎖定目標: {symbols[:5]}...")
+            else:
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ❌ Webull API 拒絕存取，狀態碼: {res.status_code}")
+                
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⚠️ Webull API 暫時阻擋，使用上一批名單。")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⚠️ Webull API 連線異常: {e}")
             
-        # 雷達每 30 秒掃描一次即可，避免被 Webull 封鎖
+        # 雷達每 30 秒掃描一次即可，避免太頻繁被 Webull 封鎖
         time.sleep(30)
 
 # ==========================================
-# ★ 核心模組 2：Yahoo 高頻狙擊鏡 (負責精算價格與量縮)
+# ★ 核心模組 2：Yahoo 高頻狙擊鏡 (負責精算 1 分鐘 K 線)
 # ==========================================
 def scanner_engine():
     count = 0
@@ -109,29 +114,33 @@ def scanner_engine():
     
     print("🔥 啟動 V4.0 終極引擎 (Webull 雷達 + Yahoo 狙擊)...")
     
-    # 啟動 Webull 獨立背景雷達
+    # 在背景啟動 Webull 雷達線程
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
+    wait_count = 0
     while True:
         try:
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # 如果還沒抓到名單，就稍等
+            # 如果還沒抓到名單，會發出待命中提示 (每 10 秒印一次)
             if not current_hot_symbols:
+                if wait_count % 5 == 0:
+                    print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中，等待 Webull 提供名單...")
+                wait_count += 1
                 time.sleep(2)
                 continue
                 
+            wait_count = 0
             symbols_to_track = list(current_hot_symbols)
             
-            # 使用 yfinance 抓取「包含盤前」的最新 1 分鐘 K 線，確保報價 100% 精準！
+            # 使用 yfinance 抓取「包含盤前」的最新 1 分鐘 K 線！
             data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, show_errors=False)
             
             extracted_stocks = []
             
             # 解析 Yahoo 回傳的 DataFrame
             if not data_df.empty:
-                # 若只有一檔股票，DataFrame 結構會不同
                 is_single = len(symbols_to_track) == 1
                 
                 for sym in symbols_to_track:
@@ -139,18 +148,16 @@ def scanner_engine():
                         if is_single:
                             latest_row = data_df.iloc[-1]
                         else:
-                            # 取得這檔股票最後一分鐘的收盤價與交易量
                             latest_row = data_df.xs(sym, level=1, axis=1).iloc[-1]
                             
                         price = float(latest_row['Close'])
                         vol = float(latest_row['Volume'])
                         
-                        # 簡單防呆，如果價格有效才加入運算
                         if pd.notna(price) and price > 0:
                             extracted_stocks.append({
                                 'sym': sym, 
                                 'price': price, 
-                                'change_str': "---", # Yahoo 1分K難以算全日漲幅，由前端顯示為主
+                                'change_str': "Webull", # 這裡交給前端
                                 'vol_raw': vol,
                                 'rvol_tw': vol / 50000.0 # 粗略量比估算
                             })
@@ -160,7 +167,7 @@ def scanner_engine():
             t_all, c_hod, c_surge, c_grind = [], [], [], []
             current_t = time.time()
             
-            # --- 進入您熟悉的微觀運算邏輯 (與之前完全相同，判斷紫燈、量縮) ---
+            # --- 進入 Ross Cameron 微觀運算邏輯 ---
             for data in extracted_stocks:
                 sym = data['sym']
                 p_num = data['price']
@@ -192,13 +199,14 @@ def scanner_engine():
                 is_hod_break = False
                 if p_num > cell["HOD"]: cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
                 
-                gap_p = 0 # 簡化計算
+                gap_p = 0
                 drop_p = ((p_num - cell['HOD']) / cell['HOD'] * 100) if cell['HOD'] > 0 else 0
                 float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                 
                 last_price = cell.get("last_price", p_num)
                 last_vol = cell.get("last_vol", vol_raw)
-                # K線模式：因為每次抓的是當前1分鐘的總量，我們用價格變化來判斷買賣壓
+                
+                # 因為每次抓的是當前1分鐘的總量，我們用價格變化來判斷這分鐘是買盤還是賣盤
                 curr_vol_delta = vol_raw
                 
                 if curr_vol_delta > 0:
@@ -213,7 +221,7 @@ def scanner_engine():
 
                 net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
 
-                # --- 短線動能追蹤演算法 ---
+                # --- 短線動能追蹤演算法 (1/3 量縮與 V 轉) ---
                 recent_high = cell.get("recent_high", initial_hod)
                 surge_start_price = cell.get("surge_start_price", initial_hod)
                 max_surge_vol = cell.get("max_surge_vol", 0)
@@ -222,7 +230,6 @@ def scanner_engine():
                 
                 is_pullback = cell.get("is_pullback", False)
                 sniper_triggered = False
-                is_extended = False
                 sniper_label = ""
                 
                 if p_num > recent_high:
@@ -230,7 +237,6 @@ def scanner_engine():
                         swing_size = recent_high - surge_start_price
                         pb_low = cell.get("pullback_low", p_num)
                         retrace_ratio = (recent_high - pb_low) / swing_size if swing_size > 0 else 0
-                        pb_duration = current_t - pullback_start_time
                         
                         # V型突破判定
                         if p_num > pb_low * 1.01: 
@@ -275,7 +281,7 @@ def scanner_engine():
                 
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                    "Change": "Webull", "Volume": formatted_volume, 
+                    "Change": change_str, "Volume": formatted_volume, 
                     "RVOL": f"{rvol:.1f}x", "Gap": f"{gap_p:.1f}%", "Drop": f"{drop_p:.1f}%",
                     "FloatStr": float_str, "Streak": f"x{cell['streak']}", 
                     "gap_num": gap_p, "rvol_num": rvol, "f_num": f,
@@ -314,7 +320,7 @@ def scanner_engine():
 
             count += 1
             
-            # --- 更新前端顯示名單 ---
+            # --- 更新前端顯示資料庫 ---
             config.MASTER_BRAIN.update({
                 "gappers": t_all[:20], 
                 "hod": (c_hod + config.MASTER_BRAIN["hod"])[:50],
@@ -323,8 +329,9 @@ def scanner_engine():
             })
             
             cost_time = time.time() - loop_start_time
-            print(f"[{current_time_tw}] ⏱️ Yahoo 狙擊鏡掃描完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
-
+            if len(t_all) > 0:
+                print(f"[{current_time_tw}] ⏱️ Yahoo 狙擊鏡掃描完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
+            
             # 頻繁戳 Yahoo，大約每 3 秒更新一次 K 線報價
             time.sleep(3.0)
             
