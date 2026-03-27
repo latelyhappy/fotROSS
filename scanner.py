@@ -39,9 +39,10 @@ def fetch_static_bg(ticker):
         t = yf.Ticker(ticker)
         i = t.info
         f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
+        a = i.get('averageVolume', 500000) # 為了計算 RVOL，補回平均成交量
         prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
         if prev == 0: prev = 1.0
-        config.stock_cache[ticker] = (f, 500000, prev)
+        config.stock_cache[ticker] = (f, a, prev)
     except:
         config.stock_cache[ticker] = (1000000, 500000, 1.0)
 
@@ -109,22 +110,30 @@ def fetch_webull_gainers():
                             auto_hot_symbols.insert(0, sym)
                             new_found.append(sym)
                             
-                            # ✨ 萬能欄位掃描：防止 Webull 改名
+                            # 取得背景快取資料輔助計算
+                            f, avg_vol, prev_close = get_static(sym)
+                            
                             price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
                             changeRatio = item.get('changeRatio') or item.get('pChangeRatio') or '0'
                             vol = item.get('volume') or item.get('pVolume') or '0'
                             
+                            try: vol_float = float(vol)
+                            except: vol_float = 0.0
+                            
                             try: chg_float = float(changeRatio) * 100
                             except: chg_float = 0.0
                             chg_str = f"+{chg_float:.2f}%" if chg_float > 0 else f"{chg_float:.2f}%"
+                            
+                            # ✨ 萬無一失：自動計算 RVOL 填補前端空缺
+                            rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
                             
                             new_entry = {
                                 "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
                                 "Code": sym,
                                 "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
                                 "Change": chg_str,
-                                "Volume": format_vol_km(float(vol)) if float(vol) > 0 else "0K",
-                                "RVOL": "🔥Webull", 
+                                "Volume": format_vol_km(vol_float) if vol_float > 0 else "0K",
+                                "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "計算中", 
                                 "discovery_time": time.time()
                             }
                             feed_gappers.insert(0, new_entry)
@@ -163,7 +172,7 @@ def fetch_webull_gainers():
                                 "Price": f"${row.get('Price', '0')}",
                                 "Change": str(row.get('% Change', '0%')),
                                 "Volume": str(row.get('Volume', '0')),
-                                "RVOL": "🛡️Backup",
+                                "RVOL": "補齊中...",
                                 "discovery_time": time.time()
                             }
                             feed_gappers.insert(0, new_entry)
@@ -186,7 +195,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8.0 真下捲與精準回補版...")
+    print("🔥 啟動 V8.1 真下捲與數據補滿引擎...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -242,11 +251,15 @@ def scanner_engine():
                 
                 f, a, prev_close = get_static(sym)
                 
-                # ✨ 雙重核對回補：如果 Webull 沒抓到價格，讓 Yahoo 補回去！
+                # ✨ 雙重核對回補：只要漏掉，Yahoo 立刻補上
                 for gap_entry in feed_gappers:
-                    if gap_entry['Code'] == sym and gap_entry['Price'] == "獲取中":
-                        gap_entry['Price'] = f"${p_num:.2f}"
-                        gap_entry['Volume'] = format_vol_km(vol_raw)
+                    if gap_entry['Code'] == sym:
+                        if gap_entry['Price'] == "獲取中" or gap_entry['Price'] == "$0":
+                            gap_entry['Price'] = f"${p_num:.2f}"
+                        if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0":
+                            gap_entry['Volume'] = format_vol_km(vol_raw)
+                        if "補齊中" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL']:
+                            gap_entry['RVOL'] = f"{rvol:.1f}x"
                         if gap_entry['Change'] == "0.00%":
                             chg = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
                             gap_entry['Change'] = f"+{chg:.2f}%" if chg > 0 else f"{chg:.2f}%"
@@ -357,7 +370,7 @@ def scanner_engine():
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
             config.MASTER_BRAIN.update({
-                "gappers": feed_gappers,                 # 保留最完美的微牛日誌
+                "gappers": feed_gappers,                 
                 "hod": feed_hod,                         
                 "surge": feed_surge,                       
                 "high_vol": high_vol_sorted[:1000],       
