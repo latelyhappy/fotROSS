@@ -234,7 +234,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V9.0 (排版記憶 + 全面漲跌金額擴充)...")
+    print("🔥 啟動 V9.1 (歷史殘留資料自癒版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -244,6 +244,13 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
+            # ✨ 自癒機制：主動掃描表格中的歷史舊資料，強制補上遺漏的 FloatStr 
+            for gap_entry in feed_gappers:
+                if "FloatStr" not in gap_entry or "ChangeAmt" not in gap_entry:
+                    f, _, _ = get_static(gap_entry['Code'])
+                    gap_entry['FloatStr'] = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                    if "ChangeAmt" not in gap_entry: gap_entry['ChangeAmt'] = "$0.00"
+
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
@@ -306,8 +313,7 @@ def scanner_engine():
                             gap_entry['Change'] = change_str
                         if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'):
                             gap_entry['ChangeAmt'] = chg_amt_str
-                        if "FloatStr" not in gap_entry:
-                            gap_entry['FloatStr'] = float_str
+                        gap_entry['FloatStr'] = float_str
                 
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
@@ -375,7 +381,6 @@ def scanner_engine():
                             cell["max_news_score"] += 10 
                             break
                 
-                # ✨ 在 Yahoo 輸出的所有名單也確實加上 ChangeAmt 變數
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "ChangeAmt": chg_amt_str, "Change": change_str, 
@@ -396,8 +401,7 @@ def scanner_engine():
                     threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["last_price"] = p_num
-                cell["RVOL"] = f"{rvol:.1f}x"
-                cell["FloatStr"] = float_str
+                cell["RVOL"] = f"{rvol:.1f}x"; cell["FloatStr"] = float_str
                 
                 config.MASTER_BRAIN["details"][sym] = cell
 
