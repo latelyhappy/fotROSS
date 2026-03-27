@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V8.8 - 終極實戰版</title>
+    <title>ROSS Sniper V9.0 - 專屬排版實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -54,16 +54,16 @@
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
     </div>
     
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:500px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-vol" style="top:300px; left:10px; width:500px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-netvol" style="top:590px; left:10px; width:500px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:520px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-vol" style="top:300px; left:10px; width:520px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-netvol" style="top:590px; left:10px; width:520px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-surge" style="top:10px; left:520px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-hod" style="top:450px; left:520px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:540px; width:540px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:450px; left:540px; width:540px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-news-score" style="top:10px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-grind" style="top:300px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:590px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-news-score" style="top:10px; left:1090px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-grind" style="top:300px; left:1090px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:590px; left:1090px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
     
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
@@ -77,6 +77,37 @@
         let brainDetailsCache = {};
         let activeSymbol = "";
 
+        // =====================================
+        // ✨ 儲存與讀取排版引擎 (LocalStorage)
+        // =====================================
+        function saveLayout() {
+            const layout = {};
+            document.querySelectorAll('.window').forEach(win => {
+                layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height };
+            });
+            localStorage.setItem('rossSniperLayout', JSON.stringify(layout));
+        }
+
+        function loadLayout() {
+            const layoutStr = localStorage.getItem('rossSniperLayout');
+            if (layoutStr) {
+                try {
+                    const layout = JSON.parse(layoutStr);
+                    document.querySelectorAll('.window').forEach(win => {
+                        if (layout[win.id]) {
+                            if (layout[win.id].top) win.style.top = layout[win.id].top;
+                            if (layout[win.id].left) win.style.left = layout[win.id].left;
+                            if (layout[win.id].width) win.style.width = layout[win.id].width;
+                            if (layout[win.id].height) win.style.height = layout[win.id].height;
+                        }
+                    });
+                } catch(e) { console.error("Layout load error", e); }
+            }
+        }
+
+        // =====================================
+        // 視窗拖曳與縮放控制邏輯 (優化效能)
+        // =====================================
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
@@ -91,13 +122,49 @@
             else { btn.innerText = "⏸️ 暫停滾動"; btn.style.background = "#f85149"; btn.style.borderColor = "#f85149"; btn.style.animation = "pulseRed 2s infinite"; renderHOD(lastKnownHodData); }
         }
 
+        let isDragging = false, isResizing = false, activeWin = null;
+        let startX, startY, startLeft, startTop, startWidth, startHeight;
+
         document.querySelectorAll('.window').forEach(win => {
             const titleBar = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle');
-            let isDragging = false, isResizing = false; let startX, startY, startLeft, startTop, startWidth, startHeight;
-            titleBar.addEventListener('mousedown', (e) => { if (e.target.tagName.toLowerCase() === 'button') return; if(isGlobalLocked) return; isDragging = true; startX = e.clientX / currentZoom; startY = e.clientY / currentZoom; startLeft = parseInt(window.getComputedStyle(win).left, 10); startTop = parseInt(window.getComputedStyle(win).top, 10); win.style.zIndex = 100; });
-            handle.addEventListener('mousedown', (e) => { if(isGlobalLocked) return; isResizing = true; startX = e.clientX / currentZoom; startY = e.clientY / currentZoom; startWidth = parseInt(window.getComputedStyle(win).width, 10); startHeight = parseInt(window.getComputedStyle(win).height, 10); win.style.zIndex = 100; e.stopPropagation(); });
-            document.addEventListener('mousemove', (e) => { if (isDragging) { const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY; win.style.left = `${startLeft + dx}px`; win.style.top = `${startTop + dy}px`; } else if (isResizing) { const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY; win.style.width = `${Math.max(200, startWidth + dx)}px`; win.style.height = `${Math.max(100, startHeight + dy)}px`; } });
-            document.addEventListener('mouseup', () => { if (isDragging || isResizing) win.style.zIndex = 1; isDragging = false; isResizing = false; });
+            titleBar.addEventListener('mousedown', (e) => {
+                if (e.target.tagName.toLowerCase() === 'button') return;
+                if(isGlobalLocked) return;
+                isDragging = true; activeWin = win;
+                startX = e.clientX / currentZoom; startY = e.clientY / currentZoom;
+                startLeft = parseInt(window.getComputedStyle(win).left, 10) || 0;
+                startTop = parseInt(window.getComputedStyle(win).top, 10) || 0;
+                win.style.zIndex = 100;
+            });
+            handle.addEventListener('mousedown', (e) => {
+                if(isGlobalLocked) return;
+                isResizing = true; activeWin = win;
+                startX = e.clientX / currentZoom; startY = e.clientY / currentZoom;
+                startWidth = parseInt(window.getComputedStyle(win).width, 10);
+                startHeight = parseInt(window.getComputedStyle(win).height, 10);
+                win.style.zIndex = 100;
+                e.stopPropagation();
+            });
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!activeWin) return;
+            if (isDragging) {
+                const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY;
+                activeWin.style.left = `${startLeft + dx}px`; activeWin.style.top = `${startTop + dy}px`;
+            } else if (isResizing) {
+                const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY;
+                activeWin.style.width = `${Math.max(200, startWidth + dx)}px`; activeWin.style.height = `${Math.max(100, startHeight + dy)}px`;
+            }
+        });
+
+        // ✨ 滑鼠放開時，自動儲存排版
+        document.addEventListener('mouseup', () => {
+            if (activeWin && (isDragging || isResizing)) {
+                activeWin.style.zIndex = 1;
+                saveLayout();
+            }
+            isDragging = false; isResizing = false; activeWin = null;
         });
 
         function openTW(sym, event) { if(event) event.stopPropagation(); window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
@@ -138,10 +205,12 @@
 
         function renderHOD(data) {
             if(isHodPaused) return; 
+            // 🚨 加入 ChangeAmt
             renderTable('hod-list', data, [
-                {n:'時間', k:'Time', w:'15%'}, {n:'代碼', k:'Code', w:'15%'},
-                {n:'價格', k:'Price', w:'15%'}, {n:'訊號', k:'Streak', w:'20%'},
-                {n:'總量', k:'Volume', w:'15%'}, {n:'浮動股', k:'FloatStr', w:'15%'}
+                {n:'時間', k:'Time', w:'10%'}, {n:'代碼', k:'Code', w:'10%'},
+                {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
+                {n:'漲跌%', k:'Change', w:'12%'}, {n:'訊號', k:'Streak', w:'18%'},
+                {n:'總量', k:'Volume', w:'14%'}, {n:'浮動股', k:'FloatStr', w:'12%'}
             ], (row) => row.Streak.includes('虛漲') ? 'style="background:rgba(210,153,34,0.1);"' : '');
         }
 
@@ -160,7 +229,7 @@
 
                     brainDetailsCache = d.details || {};
 
-                    // 🚨 加入 ChangeAmt (漲跌$) 欄位，共 8 欄完美配置
+                    // 🚨 全面加入 ChangeAmt，並完美均分寬度
                     renderTable('gap-list', d.gappers, [
                         {n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'12%'},
                         {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'13%'},
@@ -169,17 +238,20 @@
                     ]);
                     
                     renderTable('vol-list', d.high_vol, [
-                        {n:'時間', k:'Time', w:'18%'}, {n:'代碼', k:'Code', w:'18%'},
-                        {n:'總量', k:'Volume', w:'25%'}, {n:'量比', k:'RVOL', w:'20%'}
+                        {n:'時間', k:'Time', w:'14%'}, {n:'代碼', k:'Code', w:'14%'},
+                        {n:'價格', k:'Price', w:'14%'}, {n:'漲跌$', k:'ChangeAmt', w:'14%'},
+                        {n:'漲跌%', k:'Change', w:'14%'}, {n:'總量', k:'Volume', w:'15%'}, 
+                        {n:'量比', k:'RVOL', w:'15%'}
                     ]);
 
                     lastKnownHodData = d.hod;
                     renderHOD(d.hod);
 
                     renderTable('surge-list', d.surge, [
-                        {n:'時間', k:'Time', w:'15%'}, {n:'代碼', k:'Code', w:'15%'},
-                        {n:'價格', k:'Price', w:'15%'}, {n:'🎯訊號', k:'Streak', w:'30%'},
-                        {n:'淨買量', k:'NetVolStr', w:'15%'}
+                        {n:'時間', k:'Time', w:'10%'}, {n:'代碼', k:'Code', w:'10%'},
+                        {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
+                        {n:'漲跌%', k:'Change', w:'12%'}, {n:'🎯訊號', k:'Streak', w:'30%'},
+                        {n:'淨買量', k:'NetVolStr', w:'14%'}
                     ], (row) => {
                         if (row.Streak.includes('極速') || row.Streak.includes('精準')) return 'style="background:rgba(156, 39, 176, 0.2); border-left: 3px solid #d2a8ff;"';
                         if (row.Streak.includes('爆量')) return 'style="background:rgba(210,153,34,0.1);"';
@@ -187,18 +259,22 @@
                     });
 
                     renderTable('news-score-list', d.news_leaders, [
-                        {n:'代碼', k:'Code', w:'20%'}, {n:'分數', k:'NewsScore', w:'20%'},
-                        {n:'價格', k:'Price', w:'20%'}, {n:'漲幅', k:'Change', w:'20%'}
+                        {n:'代碼', k:'Code', w:'15%'}, {n:'分數', k:'NewsScore', w:'15%'},
+                        {n:'價格', k:'Price', w:'20%'}, {n:'漲跌$', k:'ChangeAmt', w:'25%'},
+                        {n:'漲跌%', k:'Change', w:'25%'}
                     ]);
                     
                     renderTable('grind-list', d.grinders, [
-                        {n:'時間', k:'Time', w:'18%'}, {n:'代碼', k:'Code', w:'18%'},
-                        {n:'狀態', k:'Streak', w:'35%'}, {n:'價格', k:'Price', w:'18%'}
+                        {n:'時間', k:'Time', w:'15%'}, {n:'代碼', k:'Code', w:'15%'},
+                        {n:'狀態', k:'Streak', w:'25%'}, {n:'價格', k:'Price', w:'15%'},
+                        {n:'漲跌$', k:'ChangeAmt', w:'15%'}, {n:'漲跌%', k:'Change', w:'15%'}
                     ]);
 
                     renderTable('netvol-list', d.net_vol_leaders, [
-                        {n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'},
-                        {n:'淨買賣', k:'NetVolStr', w:'20%'}, {n:'主買(Buy)', k:'BuyVolStr', w:'20%'}, {n:'主賣(Sell)', k:'SellVolStr', w:'20%'}
+                        {n:'代碼', k:'Code', w:'10%'}, {n:'價格', k:'Price', w:'12%'},
+                        {n:'漲跌$', k:'ChangeAmt', w:'14%'}, {n:'漲跌%', k:'Change', w:'14%'},
+                        {n:'淨買賣', k:'NetVolStr', w:'18%'}, {n:'主買', k:'BuyVolStr', w:'16%'}, 
+                        {n:'主賣', k:'SellVolStr', w:'16%'}
                     ]);
 
                     if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
@@ -221,6 +297,9 @@
             
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
+
+        // ✨ 網頁載入時立刻套用之前儲存的排版
+        loadLayout();
 
         setInterval(refresh, 5000);
         setInterval(() => {
