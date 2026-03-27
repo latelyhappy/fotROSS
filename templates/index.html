@@ -2,9 +2,11 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V9.0 - 專屬排版實戰版</title>
+    <title>ROSS Sniper V9.2 - 完美排版與大畫布版</title>
     <style>
-        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
+        /* 🚨 魔法 1：將頁面高度增加 1.5 倍 (150vh)，並允許上下捲動 (overflow-y: auto) */
+        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
+        
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
         .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
@@ -78,27 +80,33 @@
         let activeSymbol = "";
 
         // =====================================
-        // ✨ 儲存與讀取排版引擎 (LocalStorage)
+        // ✨ 魔法 2：強化版強制排版記憶引擎
         // =====================================
         function saveLayout() {
             const layout = {};
             document.querySelectorAll('.window').forEach(win => {
-                layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height };
+                layout[win.id] = { 
+                    top: win.style.top, 
+                    left: win.style.left, 
+                    width: win.style.width, 
+                    height: win.style.height 
+                };
             });
-            localStorage.setItem('rossSniperLayout', JSON.stringify(layout));
+            localStorage.setItem('rossSniperLayout_V9', JSON.stringify(layout));
         }
 
         function loadLayout() {
-            const layoutStr = localStorage.getItem('rossSniperLayout');
+            const layoutStr = localStorage.getItem('rossSniperLayout_V9');
             if (layoutStr) {
                 try {
                     const layout = JSON.parse(layoutStr);
                     document.querySelectorAll('.window').forEach(win => {
                         if (layout[win.id]) {
-                            if (layout[win.id].top) win.style.top = layout[win.id].top;
-                            if (layout[win.id].left) win.style.left = layout[win.id].left;
-                            if (layout[win.id].width) win.style.width = layout[win.id].width;
-                            if (layout[win.id].height) win.style.height = layout[win.id].height;
+                            // 強制讀取並覆寫預設的 inline style
+                            if (layout[win.id].top) win.style.setProperty('top', layout[win.id].top, 'important');
+                            if (layout[win.id].left) win.style.setProperty('left', layout[win.id].left, 'important');
+                            if (layout[win.id].width) win.style.setProperty('width', layout[win.id].width, 'important');
+                            if (layout[win.id].height) win.style.setProperty('height', layout[win.id].height, 'important');
                         }
                     });
                 } catch(e) { console.error("Layout load error", e); }
@@ -106,7 +114,7 @@
         }
 
         // =====================================
-        // 視窗拖曳與縮放控制邏輯 (優化效能)
+        // 視窗拖曳與控制邏輯
         // =====================================
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
@@ -158,11 +166,11 @@
             }
         });
 
-        // ✨ 滑鼠放開時，自動儲存排版
+        // 滑鼠放開時立即存檔
         document.addEventListener('mouseup', () => {
             if (activeWin && (isDragging || isResizing)) {
                 activeWin.style.zIndex = 1;
-                saveLayout();
+                saveLayout(); 
             }
             isDragging = false; isResizing = false; activeWin = null;
         });
@@ -205,7 +213,6 @@
 
         function renderHOD(data) {
             if(isHodPaused) return; 
-            // 🚨 加入 ChangeAmt
             renderTable('hod-list', data, [
                 {n:'時間', k:'Time', w:'10%'}, {n:'代碼', k:'Code', w:'10%'},
                 {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
@@ -229,7 +236,6 @@
 
                     brainDetailsCache = d.details || {};
 
-                    // 🚨 全面加入 ChangeAmt，並完美均分寬度
                     renderTable('gap-list', d.gappers, [
                         {n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'12%'},
                         {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'13%'},
@@ -278,6 +284,9 @@
                     ]);
 
                     if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
+                    
+                    // ✨ 每次資料更新完，強制背景存檔排版，確保萬無一失！
+                    saveLayout();
                 })
                 .catch(err => console.error(err));
         }
@@ -298,7 +307,7 @@
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        // ✨ 網頁載入時立刻套用之前儲存的排版
+        // 啟動時讀取排版
         loadLayout();
 
         setInterval(refresh, 5000);
