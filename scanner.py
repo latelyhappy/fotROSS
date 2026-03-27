@@ -57,12 +57,21 @@ def get_static(ticker):
         threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
         return (1000000, 500000, 1.0)
 
+# 🎯 修正 M/K 轉換邏輯，確保精確還原為浮點數
+def parse_vol_to_float(v):
+    try:
+        if isinstance(v, str):
+            v = v.replace(',', '').upper().strip()
+            if 'M' in v: return float(v.replace('M', '')) * 1_000_000
+            if 'K' in v: return float(v.replace('K', '')) * 1_000
+            return float(v)
+        return float(v)
+    except:
+        return 0.0
+
 def format_vol_km(v_float):
     try:
-        if isinstance(v_float, str):
-            v_float = v_float.replace(',', '').replace('M', '000000').replace('K', '000').strip()
-        v_float = float(v_float)
-        
+        v_float = parse_vol_to_float(v_float)
         if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
         elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
         else: return f"{int(v_float)}"
@@ -99,6 +108,8 @@ def fetch_webull_gainers():
                 time.sleep(4) 
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
+                # 🎯 動態降載機制：如果是盤前 (rank_type="2")，成交量門檻降到 5000，確保有股票進來
+                min_vol = "5000" if rank_type == "2" else "50000"
                 
                 js_code = f"""
                 async () => {{
@@ -107,7 +118,7 @@ def fetch_webull_gainers():
                         "rules": [
                             {{"proId": "fm_13", "rule": "between", "val": ["1", "20"]}},       
                             {{"proId": "fm_43", "rule": "between", "val": ["0", "20000000"]}}, 
-                            {{"proId": "fm_14", "rule": "between", "val": ["50000", "999999999"]}}
+                            {{"proId": "fm_14", "rule": "between", "val": ["{min_vol}", "999999999"]}}
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -180,7 +191,6 @@ def fetch_webull_gainers():
                 elif rank_type == "1": url = "https://stockanalysis.com/markets/after-hours/"
                 else: url = "https://stockanalysis.com/markets/gainers/"
                 
-                # 🛡️ 這裡套用破甲防護模組
                 res = scraper.get(url, timeout=15)
                 df_list = pd.read_html(StringIO(res.text))
                 
@@ -205,10 +215,9 @@ def fetch_webull_gainers():
                             p_val = str(row[price_col]).replace('$', '') if price_col and pd.notna(row[price_col]) else '0'
                             c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
                             c_amt_val = str(row[change_amt_col]).replace('+', '').replace('$', '') if change_amt_col and pd.notna(row[change_amt_col]) else '0'
-                            v_val_str = str(row[vol_col]).replace(',', '').replace('M', '000000').replace('K', '000') if vol_col and pd.notna(row[vol_col]) else '0'
                             
-                            try: v_float = float(v_val_str)
-                            except: v_float = 0.0
+                            # 🎯 精準轉換字串為浮點數量
+                            v_float = parse_vol_to_float(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else 0.0
                             
                             try: c_amt_float = float(c_amt_val)
                             except: c_amt_float = 0.0
@@ -244,7 +253,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V10 終極版 (Ross 戰法靈魂注入)...")
+    print("🔥 啟動 V10.1 (凌晨開盤防空載對策版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -262,9 +271,19 @@ def scanner_engine():
 
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
+            # 🎯 強制心跳機制：就算沒股票，也要更新 config.MASTER_BRAIN 的時間，讓前端知道伺服器還活著！
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中...")
-                wait_count += 1; time.sleep(2)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 凌晨無足夠交易量，狙擊鏡待命中...")
+                wait_count += 1
+                
+                # 強制更新空狀態
+                config.MASTER_BRAIN.update({
+                    "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
+                    "high_vol": [], "net_vol_leaders": [], "grinders": [], "news_leaders": [],
+                    "last_update": current_time_tw, "scan_count": count
+                })
+                count += 1
+                time.sleep(2)
                 continue
                 
             wait_count = 0
@@ -294,8 +313,6 @@ def scanner_engine():
 
             t_all = []
             current_t = time.time()
-            
-            # 📊 緩漲名單 (Grinders) 的專用存放區
             active_grinders = []
             
             for data in extracted_stocks:
@@ -344,7 +361,6 @@ def scanner_engine():
                 last_price = cell.get("last_price", p_num)
                 curr_vol_delta = vol_raw
                 
-                # 📊 補回：主力無量緩漲 (Grinders) 演算法
                 if curr_vol_delta > 0:
                     if p_num > last_price:
                         cell["cum_buy_vol"] += curr_vol_delta
@@ -358,7 +374,6 @@ def scanner_engine():
                         cell["GrindCount"] -= 1
                 net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
 
-                # 判斷是否為無量緩漲
                 if cell["GrindCount"] >= 3 and cell["pos_vol_streak"] >= 3 and vol_raw < 500000:
                     cell["is_grinder"] = True
                     active_grinders.append({
@@ -377,11 +392,9 @@ def scanner_engine():
                 sniper_triggered = False
                 sniper_label = ""
                 
-                # 🎯 補回：精準回調、爆量、虛漲陷阱的多重判斷邏輯
                 if p_num > recent_high:
                     if is_pullback:
                         pb_low = cell.get("pullback_low", p_num)
-                        # 紫色警告：精準回調 (Pullback 反彈)
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
                             sniper_label = "🎯精準回調"
@@ -392,7 +405,6 @@ def scanner_engine():
                         max_surge_vol = max(max_surge_vol, curr_vol_delta)
                     recent_high = p_num
                     
-                    # 判斷破高時的異常狀態
                     if is_hod_break:
                         if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0:
                             sniper_triggered = True
@@ -419,7 +431,6 @@ def scanner_engine():
                 cell["sniper_triggered"] = sniper_triggered
                 if sniper_triggered: cell["sniper_label"] = sniper_label
                 
-                # 根據訊號強度覆寫標籤
                 streak_text = f"x{cell['streak']}"
                 if is_hod_break: 
                     if sniper_triggered: streak_text = f"⭐破高+{cell['sniper_label']}"
@@ -448,7 +459,6 @@ def scanner_engine():
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
-                # 🎯 極速(9EMA) 邏輯：連兩次破高且量能充沛，或觸發了紫橘色警報
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > 10000):
                     if not sniper_triggered: 
                         item["Streak"] = "⚡極速(9EMA)"
@@ -475,6 +485,7 @@ def scanner_engine():
             grind_sorted = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
+            # 🎯 確實將所有資料推送到前端
             config.MASTER_BRAIN.update({
                 "gappers": gappers_sorted[:1000],                 
                 "hod": feed_hod,                         
