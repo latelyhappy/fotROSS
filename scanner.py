@@ -74,6 +74,7 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
+                # ✅ 修正：移除容易報錯的百分比篩選，依靠 sort_id 降冪排序，完美取得前 30 名最大漲幅股票
                 js_code = f"""
                 async () => {{
                     const payload = {{
@@ -81,8 +82,7 @@ def fetch_webull_gainers():
                         "rules": [
                             {{"proId": "fm_13", "rule": "between", "val": ["1", "20"]}},       
                             {{"proId": "fm_43", "rule": "between", "val": ["0", "20000000"]}}, 
-                            {{"proId": "fm_14", "rule": "between", "val": ["50000", "999999999"]}}, 
-                            {{"proId": "{sort_id}", "rule": "between", "val": ["0.05", "10"]}} 
+                            {{"proId": "fm_14", "rule": "between", "val": ["50000", "999999999"]}}
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -103,8 +103,12 @@ def fetch_webull_gainers():
                     if sym and '-' not in sym: symbols.append(sym)
                 
                 if symbols:
-                    auto_hot_symbols = symbols 
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull Ross策略篩選成功: {symbols[:5]}...")
+                    # ✅ 修正：使用下捲式邏輯，將新找到的股票「安插在最前面」，並累積達 1000 筆！
+                    for s in reversed(symbols):
+                        if s not in auto_hot_symbols:
+                            auto_hot_symbols.insert(0, s)
+                    auto_hot_symbols = auto_hot_symbols[:1000]
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull Ross策略篩選成功: 最新加入 {symbols[:5]}... (目前總追蹤 {len(auto_hot_symbols)} 檔)")
                 else:
                     raise ValueError("Webull 篩選回傳空值")
                     
@@ -120,8 +124,11 @@ def fetch_webull_gainers():
                     symbols = df_list[0]['Symbol'].dropna().tolist()
                     symbols = [str(s) for s in symbols if isinstance(s, str) and '-' not in s][:30]
                     if symbols:
-                        auto_hot_symbols = symbols
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達鎖定目標: {symbols[:5]}...")
+                        for s in reversed(symbols):
+                            if s not in auto_hot_symbols:
+                                auto_hot_symbols.insert(0, s)
+                        auto_hot_symbols = auto_hot_symbols[:1000]
+                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達鎖定目標: 最新加入 {symbols[:5]}... (目前總追蹤 {len(auto_hot_symbols)} 檔)")
             except Exception as ex:
                 pass
                 
@@ -136,7 +143,7 @@ def fetch_webull_gainers():
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動全自動防護版 (多層防呆解析 + 千筆大容量)...")
+    print("🔥 啟動 V7.2 完美下捲修正版 (解決篩選空值 + 累積千筆歷史)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -146,7 +153,6 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # 純自動化陣列
             symbols_to_track = list(set(auto_hot_symbols))
             
             if not symbols_to_track:
@@ -158,22 +164,20 @@ def scanner_engine():
                 
             wait_count = 0
             
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=5)
+            # 使用 group_by='ticker' 確保 yfinance 在有壞掉的代碼時，依舊能保持結構穩定
+            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
             
             extracted_stocks = []
             if not data_df.empty:
-                # ★ 智慧多層防呆解析：防止 yfinance 因個別股票抓不到而自動降級維度
-                is_multi = isinstance(data_df.columns, pd.MultiIndex)
                 for sym in symbols_to_track:
                     try:
-                        if is_multi:
-                            # 如果 yfinance 移除了該壞掉的股票，跳過它
-                            if sym not in data_df.columns.get_level_values(1):
-                                continue
-                            latest_row = data_df.xs(sym, level=1, axis=1).iloc[-1]
-                        else:
-                            # 如果剛好只成功抓到 1 支股票，它會自動降級成單層
+                        if len(symbols_to_track) == 1:
                             latest_row = data_df.iloc[-1]
+                        else:
+                            # 如果該股票被 Yahoo 剔除，就跳過它，保護其他正常的股票
+                            if sym not in data_df.columns.get_level_values(0):
+                                continue
+                            latest_row = data_df[sym].iloc[-1]
                             
                         price = float(latest_row['Close'])
                         vol = float(latest_row['Volume'])
@@ -210,7 +214,8 @@ def scanner_engine():
                     "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
                     "surge_start_price": initial_hod, "max_surge_vol": 0, 
                     "pullback_start_time": 0, "pullback_min_vol": 9999999,
-                    "surge_wave_count": 0, "pullback_low": p_num, "sniper_label": ""
+                    "surge_wave_count": 0, "pullback_low": p_num, "sniper_label": "",
+                    "discovery_time": current_t  # ✅ 紀錄發現時間，用來實現下捲式排序
                 })
                 
                 is_hod_break = False
@@ -313,15 +318,19 @@ def scanner_engine():
 
             count += 1
             
-            # 千筆大容量與下捲更新
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
+            
+            # ✅ 修正：嚴格依據「發現時間」排序，最新的永遠在最上方，完美實現下捲式更新！
+            gappers_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["discovery_time"], reverse=True)
+            
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
             net_vol_sorted = sorted(t_all, key=lambda x: x['NetVolNum'], reverse=True)
             grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
+            # 全部擴展至 1000 筆容量
             config.MASTER_BRAIN.update({
-                "gappers": t_all[:1000], 
+                "gappers": gappers_sorted[:1000], 
                 "hod": (c_hod + config.MASTER_BRAIN["hod"])[:1000],
                 "surge": (c_surge + config.MASTER_BRAIN["surge"])[:1000],
                 "high_vol": high_vol_sorted[:1000],       
@@ -336,7 +345,6 @@ def scanner_engine():
             if len(t_all) > 0:
                 print(f"[{current_time_tw}] ⏱️ 狙擊完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
             
-            # ⏱️ 動態隨機延遲 (8秒 ± 4秒 = 4 ~ 12 秒)
             delay = random.randint(4, 12)
             time.sleep(delay)
             
