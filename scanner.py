@@ -9,7 +9,7 @@ from io import StringIO
 import config
 from news_engine import fetch_news_bg
 
-# 🛡️ 補回：Cloudscraper 破甲防護模組
+# 🛡️ Cloudscraper 破甲防護模組
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
@@ -57,7 +57,6 @@ def get_static(ticker):
         threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
         return (1000000, 500000, 1.0)
 
-# 🎯 修正 M/K 轉換邏輯，確保精確還原為浮點數
 def parse_vol_to_float(v):
     try:
         if isinstance(v, str):
@@ -108,7 +107,6 @@ def fetch_webull_gainers():
                 time.sleep(4) 
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
-                # 🎯 動態降載機制：如果是盤前 (rank_type="2")，成交量門檻降到 5000，確保有股票進來
                 min_vol = "5000" if rank_type == "2" else "50000"
                 
                 js_code = f"""
@@ -178,7 +176,6 @@ def fetch_webull_gainers():
                     feed_gappers = feed_gappers[:1000]
                     auto_hot_symbols = auto_hot_symbols[:200] 
                 elif not data.get('data', []):
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ℹ️ 盤前無足夠交易量 (Webull 篩選為空)，切換備用雷達...")
                     raise ValueError("深夜靜音模式切換")
                     
         except Exception as e:
@@ -216,7 +213,6 @@ def fetch_webull_gainers():
                             c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
                             c_amt_val = str(row[change_amt_col]).replace('+', '').replace('$', '') if change_amt_col and pd.notna(row[change_amt_col]) else '0'
                             
-                            # 🎯 精準轉換字串為浮點數量
                             v_float = parse_vol_to_float(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else 0.0
                             
                             try: c_amt_float = float(c_amt_val)
@@ -253,7 +249,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V10.1 (凌晨開盤防空載對策版)...")
+    print("🔥 啟動 V10.2 (記憶體自適應修復版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -271,12 +267,11 @@ def scanner_engine():
 
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
-            # 🎯 強制心跳機制：就算沒股票，也要更新 config.MASTER_BRAIN 的時間，讓前端知道伺服器還活著！
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 凌晨無足夠交易量，狙擊鏡待命中...")
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...")
                 wait_count += 1
                 
-                # 強制更新空狀態
+                # 即使沒股票，也必須更新前端，讓網頁連線時間保持跳動！
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
                     "high_vol": [], "net_vol_leaders": [], "grinders": [], "news_leaders": [],
@@ -347,18 +342,35 @@ def scanner_engine():
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
                 
-                cell = config.MASTER_BRAIN["details"].get(sym, {
-                    "HOD": initial_hod, "NewsList": [], "max_news_score": 0, "streak": 0, 
-                    "last_price": p_num, "cum_buy_vol": 0, "cum_sell_vol": 0, "is_grinder": False,
-                    "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
-                    "surge_start_price": initial_hod, "max_surge_vol": 0, "pullback_low": p_num, "sniper_label": "",
-                    "pos_vol_streak": 0, "neg_vol_streak": 0, "GrindCount": 0, "last_vol_delta": 0
-                })
+                # 🚨 致命修復：主動補齊所有可能缺失的欄位，防止舊記憶體造成 KeyError 閃退
+                cell = config.MASTER_BRAIN["details"].get(sym, {})
+                cell.setdefault("HOD", initial_hod)
+                cell.setdefault("NewsList", [])
+                cell.setdefault("max_news_score", 0)
+                cell.setdefault("streak", 0)
+                cell.setdefault("last_price", p_num)
+                cell.setdefault("cum_buy_vol", 0)
+                cell.setdefault("cum_sell_vol", 0)
+                cell.setdefault("is_grinder", False)
+                cell.setdefault("recent_high", initial_hod)
+                cell.setdefault("is_pullback", False)
+                cell.setdefault("sniper_triggered", False)
+                cell.setdefault("surge_start_price", initial_hod)
+                cell.setdefault("max_surge_vol", 0)
+                cell.setdefault("pullback_low", p_num)
+                cell.setdefault("sniper_label", "")
+                cell.setdefault("pos_vol_streak", 0)
+                cell.setdefault("neg_vol_streak", 0)
+                cell.setdefault("GrindCount", 0)
+                cell.setdefault("last_vol_delta", 0)
                 
                 is_hod_break = False
-                if p_num > cell["HOD"]: cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
+                if p_num > cell["HOD"]: 
+                    cell["HOD"] = p_num
+                    cell["streak"] += 1
+                    is_hod_break = True
                 
-                last_price = cell.get("last_price", p_num)
+                last_price = cell["last_price"]
                 curr_vol_delta = vol_raw
                 
                 if curr_vol_delta > 0:
@@ -385,16 +397,16 @@ def scanner_engine():
                 elif cell["GrindCount"] <= -2:
                     cell["is_grinder"] = False
 
-                recent_high = cell.get("recent_high", initial_hod)
-                surge_start_price = cell.get("surge_start_price", initial_hod)
-                is_pullback = cell.get("is_pullback", False)
-                max_surge_vol = cell.get("max_surge_vol", 0)
+                recent_high = cell["recent_high"]
+                surge_start_price = cell["surge_start_price"]
+                is_pullback = cell["is_pullback"]
+                max_surge_vol = cell["max_surge_vol"]
                 sniper_triggered = False
                 sniper_label = ""
                 
                 if p_num > recent_high:
                     if is_pullback:
-                        pb_low = cell.get("pullback_low", p_num)
+                        pb_low = cell["pullback_low"]
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
                             sniper_label = "🎯精準回調"
@@ -421,13 +433,14 @@ def scanner_engine():
                             is_pullback = True
                             cell["pullback_low"] = p_num
                         else:
-                            cell["pullback_low"] = min(cell.get("pullback_low", p_num), p_num)
+                            cell["pullback_low"] = min(cell["pullback_low"], p_num)
                     else:
                         is_pullback = False 
 
                 cell["recent_high"] = recent_high
                 cell["surge_start_price"] = surge_start_price
                 cell["is_pullback"] = is_pullback
+                cell["max_surge_vol"] = max_surge_vol
                 cell["sniper_triggered"] = sniper_triggered
                 if sniper_triggered: cell["sniper_label"] = sniper_label
                 
@@ -439,7 +452,7 @@ def scanner_engine():
                     streak_text = f"{cell['sniper_label']}"
 
                 has_catalyst = False
-                for news in cell.get("NewsList", []):
+                for news in cell["NewsList"]:
                     for kw in CATALYST_KEYWORDS:
                         if kw in news.get("title", "").upper():
                             has_catalyst = True
@@ -469,8 +482,10 @@ def scanner_engine():
                     cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView 查看線圖", "score": 0, "link": tw_url, "time": ""}]
                     threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                     
-                cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["last_price"] = p_num
-                cell["RVOL"] = f"{rvol:.1f}x"; cell["FloatStr"] = float_str
+                cell["HOD_str"] = f"${cell['HOD']:.2f}"
+                cell["last_price"] = p_num
+                cell["RVOL"] = f"{rvol:.1f}x"
+                cell["FloatStr"] = float_str
                 
                 config.MASTER_BRAIN["details"][sym] = cell
 
@@ -485,7 +500,6 @@ def scanner_engine():
             grind_sorted = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
-            # 🎯 確實將所有資料推送到前端
             config.MASTER_BRAIN.update({
                 "gappers": gappers_sorted[:1000],                 
                 "hod": feed_hod,                         
@@ -501,4 +515,6 @@ def scanner_engine():
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
+            # 加入列印詳細錯誤，避免未來再發生無聲閃退
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
             time.sleep(5)
