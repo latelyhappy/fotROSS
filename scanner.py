@@ -30,6 +30,7 @@ def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
     now_ny = datetime.now(tz_ny)
     current_time = now_ny.time()
+    # 美股深夜時段 (20:00 ~ 04:00) 其實沒有交易，但我們歸類為盤前或盤後方便雷達抓歷史資料
     if current_time < datetime.strptime("09:30", "%H:%M").time(): return "2", "盤前"
     elif current_time > datetime.strptime("16:00", "%H:%M").time(): return "1", "盤後"
     else: return "0", "盤中"
@@ -39,7 +40,7 @@ def fetch_static_bg(ticker):
         t = yf.Ticker(ticker)
         i = t.info
         f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
-        a = i.get('averageVolume', 500000) # 為了計算 RVOL，補回平均成交量
+        a = i.get('averageVolume', 500000)
         prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
         if prev == 0: prev = 1.0
         config.stock_cache[ticker] = (f, a, prev)
@@ -59,7 +60,7 @@ def format_vol_km(v_float):
     else: return f"{int(v_float)}"
 
 # ==========================================
-# ★ 核心模組 1：Webull 主引擎 (萬能掃描與攔截)
+# ★ 核心模組 1：Webull 主引擎 & 萬能備用雷達
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers, discovered_symbols
@@ -110,7 +111,6 @@ def fetch_webull_gainers():
                             auto_hot_symbols.insert(0, sym)
                             new_found.append(sym)
                             
-                            # 取得背景快取資料輔助計算
                             f, avg_vol, prev_close = get_static(sym)
                             
                             price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
@@ -124,7 +124,6 @@ def fetch_webull_gainers():
                             except: chg_float = 0.0
                             chg_str = f"+{chg_float:.2f}%" if chg_float > 0 else f"{chg_float:.2f}%"
                             
-                            # ✨ 萬無一失：自動計算 RVOL 填補前端空缺
                             rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
                             
                             new_entry = {
@@ -143,10 +142,10 @@ def fetch_webull_gainers():
                     auto_hot_symbols = auto_hot_symbols[:200] 
                     print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 發現新目標: {new_found}")
                 elif not data.get('data', []):
-                    raise ValueError("Webull 篩選回傳空值")
+                    raise ValueError("Webull 篩選回傳空值 (可能是深夜無交易量)")
                     
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗 ({e})，啟動備用雷達...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗 ({e})，啟動備用雷達...")
             try:
                 rank_type, _ = get_market_rank_type()
                 if rank_type == "2": url = "https://stockanalysis.com/markets/premarket/"
@@ -157,8 +156,14 @@ def fetch_webull_gainers():
                 df_list = pd.read_html(StringIO(res.text))
                 
                 if df_list:
+                    df = df_list[0]
+                    # ✨ V8.2 萬能欄位掃描器：不管網站怎麼改欄位名字，強制挖出數據！
+                    price_col = next((c for c in df.columns if 'price' in c.lower() or 'last' in c.lower()), None)
+                    change_col = next((c for c in df.columns if '%' in c or 'change' in c.lower()), None)
+                    vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
+                    
                     new_found = []
-                    for idx, row in df_list[0].iterrows():
+                    for idx, row in df.iterrows():
                         if idx > 29: break
                         sym = str(row.get('Symbol', ''))
                         if sym and '-' not in sym and sym not in discovered_symbols:
@@ -166,13 +171,18 @@ def fetch_webull_gainers():
                             auto_hot_symbols.insert(0, sym)
                             new_found.append(sym)
                             
+                            # 萃取髒資料並清理
+                            p_val = str(row[price_col]) if price_col and pd.notna(row[price_col]) else '0'
+                            c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
+                            v_val = str(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else '0'
+                            
                             new_entry = {
                                 "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
                                 "Code": sym,
-                                "Price": f"${row.get('Price', '0')}",
-                                "Change": str(row.get('% Change', '0%')),
-                                "Volume": str(row.get('Volume', '0')),
-                                "RVOL": "補齊中...",
+                                "Price": f"${p_val}" if not p_val.startswith('$') else p_val,
+                                "Change": c_val if '%' in c_val else f"{c_val}%",
+                                "Volume": v_val,
+                                "RVOL": "雷達鎖定...",
                                 "discovery_time": time.time()
                             }
                             feed_gappers.insert(0, new_entry)
@@ -195,7 +205,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8.1 真下捲與數據補滿引擎...")
+    print("🔥 啟動 V8.2 夜間無敵裝甲版...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -251,16 +261,16 @@ def scanner_engine():
                 
                 f, a, prev_close = get_static(sym)
                 
-                # ✨ 雙重核對回補：只要漏掉，Yahoo 立刻補上
+                # ✨ 雙重核對回補：如果深夜 Yahoo 有抓到零星報價，強制幫備用雷達補齊
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
-                        if gap_entry['Price'] == "獲取中" or gap_entry['Price'] == "$0":
+                        if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']:
                             gap_entry['Price'] = f"${p_num:.2f}"
                         if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0":
                             gap_entry['Volume'] = format_vol_km(vol_raw)
-                        if "補齊中" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL']:
+                        if "雷達" in gap_entry['RVOL'] or "補齊" in gap_entry['RVOL']:
                             gap_entry['RVOL'] = f"{rvol:.1f}x"
-                        if gap_entry['Change'] == "0.00%":
+                        if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0":
                             chg = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
                             gap_entry['Change'] = f"+{chg:.2f}%" if chg > 0 else f"{chg:.2f}%"
                 
