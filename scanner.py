@@ -4,23 +4,23 @@ import pytz
 import yfinance as yf
 import pandas as pd
 from playwright.sync_api import sync_playwright
+from io import StringIO # ✅ 解決 read_html 的 FutureWarning 警告
 
 import config
 from news_engine import fetch_news_bg
 
-WATCHLIST_FILE = "watchlist.txt"
+# ✅ 已經徹底移除手動輸入的檔案監聽機制
 auto_hot_symbols = [] 
 
-if not os.path.exists(WATCHLIST_FILE):
-    with open(WATCHLIST_FILE, "w") as f:
-        f.write("")
-
-def get_manual_symbols():
-    try:
-        with open(WATCHLIST_FILE, "r") as f:
-            return [line.strip().upper() for line in f.readlines() if line.strip()]
-    except:
-        return []
+# ==========================================
+# 🎯 華爾街催化劑黃金關鍵字庫 (支援中英文)
+# ==========================================
+CATALYST_KEYWORDS = [
+    'FDA', 'MERGER', 'ACQUISITION', 'BUYOUT', 'EARNINGS', 'PATENT', 
+    'PHASE', 'AGREEMENT', 'CONTRACT', 'PARTNERSHIP', 'TRIAL', 
+    'CLEARANCE', 'APPROVAL', 'REVENUE', 'GUIDANCE',
+    '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
+]
 
 def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
@@ -30,7 +30,6 @@ def get_market_rank_type():
     elif current_time > datetime.strptime("16:00", "%H:%M").time(): return "1", "盤後"
     else: return "0", "盤中"
 
-# ✅ 修復 1：精確抓取「昨收價 (Previous Close)」，用來計算真實的漲跌幅
 def fetch_static_bg(ticker):
     try:
         t = yf.Ticker(ticker)
@@ -75,16 +74,16 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # 💡 如果您想修改 Ross 篩選條件，直接改下面這裡的數字！
-                # 例如：想抓 2元~50元 的股票，就把 ["1", "20"] 改成 ["2", "50"]
+                # ✅ 確保 Webull Ross 篩選策略保持不變且運作正常
                 js_code = f"""
                 async () => {{
                     const payload = {{
                         "fetch": 30,
                         "rules": [
-                            {{"proId": "fm_13", "rule": "between", "val": ["1", "20"]}},       // 條件：價格區間
-                            {{"proId": "fm_43", "rule": "between", "val": ["0", "20000000"]}}, // 條件：流通股 < 20M
-                            {{"proId": "fm_14", "rule": "between", "val": ["50000", "999999999"]}} // 條件：成交量 > 5萬
+                            {{"proId": "fm_13", "rule": "between", "val": ["1", "20"]}},       
+                            {{"proId": "fm_43", "rule": "between", "val": ["0", "20000000"]}}, 
+                            {{"proId": "fm_14", "rule": "between", "val": ["50000", "999999999"]}}, 
+                            {{"proId": "{sort_id}", "rule": "between", "val": ["0.05", "10"]}} 
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -111,15 +110,17 @@ def fetch_webull_gainers():
                     raise ValueError("Webull 篩選回傳空值")
                     
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗 ({e})，立刻切換【無備用雷達】...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗 ({e})，立刻切換【無敵備用雷達】...")
             try:
                 rank_type, _ = get_market_rank_type()
                 url = "https://stockanalysis.com/markets/premarket/" if rank_type == "2" else "https://stockanalysis.com/markets/gainers/"
-                res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-                df_list = pd.read_html(res.text)
+                res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                
+                # ✅ 解決 FutureWarning：用 StringIO 包裝 HTML 文字
+                df_list = pd.read_html(StringIO(res.text))
                 if df_list:
                     symbols = df_list[0]['Symbol'].dropna().tolist()
-                    symbols = [str(s) for s in symbols if isinstance(s, str) and '-' not in s][:20]
+                    symbols = [str(s) for s in symbols if isinstance(s, str) and '-' not in s][:30]
                     if symbols:
                         auto_hot_symbols = symbols
                         print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達鎖定目標: {symbols[:5]}...")
@@ -129,12 +130,12 @@ def fetch_webull_gainers():
         time.sleep(30)
 
 # ==========================================
-# ★ 核心模組 2：Yahoo 高頻狙擊鏡 (全數據還原)
+# ★ 核心模組 2：Yahoo 高頻狙擊鏡
 # ==========================================
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V6.5 完美排版版 (隱形篩選雷達 + 備用系統 + 手動狙擊)...")
+    print("🔥 啟動 V7.0 全自動版 (千筆大容量 + 取消手動 + 修正 StringIO)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -144,10 +145,10 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            manual_symbols = get_manual_symbols()
-            combined_symbols = list(set(auto_hot_symbols + manual_symbols))
+            # ✅ 取消手動輸入邏輯，純依靠雷達自動名單
+            symbols_to_track = list(set(auto_hot_symbols))
             
-            if not combined_symbols:
+            if not symbols_to_track:
                 if wait_count % 5 == 0:
                     print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中...")
                 wait_count += 1
@@ -155,8 +156,9 @@ def scanner_engine():
                 continue
                 
             wait_count = 0
-            symbols_to_track = combined_symbols
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False)
+            
+            # ✅ 解決 curl Timeout 錯誤：加上 timeout=5 保護機制，防止報價卡死
+            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=5)
             
             extracted_stocks = []
             if not data_df.empty:
@@ -182,11 +184,9 @@ def scanner_engine():
                 vol_raw = data['vol_raw']
                 rvol = data['rvol_tw']
                 
-                # 取出浮動股本與昨收價
                 f, a, prev_close = get_static(sym)
                 formatted_volume = format_vol_km(vol_raw)
                 
-                # 計算真實漲跌幅 (Change %)
                 change_pct = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
                 change_str = f"+{change_pct:.2f}%" if change_pct > 0 else f"{change_pct:.2f}%"
                 
@@ -229,8 +229,6 @@ def scanner_engine():
                     if is_pullback:
                         swing_size = recent_high - surge_start_price
                         pb_low = cell.get("pullback_low", p_num)
-                        retrace_ratio = (recent_high - pb_low) / swing_size if swing_size > 0 else 0
-                        
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
                             cell["surge_wave_count"] = cell.get("surge_wave_count", 0) + 1
@@ -268,12 +266,23 @@ def scanner_engine():
                 streak_text = f"x{cell['streak']}"
                 if is_hod_break: streak_text = f"⭐破高{streak_text}"
                 elif sniper_triggered: streak_text = f"{cell['sniper_label']}"
+
+                has_catalyst = False
+                for news in cell.get("NewsList", []):
+                    title_upper = news.get("title", "").upper()
+                    for kw in CATALYST_KEYWORDS:
+                        if kw in title_upper:
+                            has_catalyst = True
+                            cell["max_news_score"] += 10 
+                            break
                 
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "Change": change_str, "Volume": formatted_volume, "vol_raw": vol_raw,
                     "RVOL": f"{rvol:.1f}x", "FloatStr": float_str, "Streak": streak_text,
-                    "NetVolNum": net_vol, "NewsScore": cell["max_news_score"],
+                    "NetVolNum": net_vol, 
+                    "NewsScore": cell["max_news_score"],
+                    "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
                     "BuyVolStr": format_vol_km(cell["cum_buy_vol"]),
                     "SellVolStr": format_vol_km(cell["cum_sell_vol"])
@@ -295,22 +304,28 @@ def scanner_engine():
 
             count += 1
             
-            # ✅ 修復 2：將排版所需的陣列重新排列並打包送往前端！
-            # 依據各種指標重新排序，餵給對應的表格
+            # ==========================================
+            # 🎯 ✅ 修正 5：表格容量全面提升至 1000 筆，舊資料往下擠！
+            # ==========================================
+            news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
+            
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
             net_vol_sorted = sorted(t_all, key=lambda x: x['NetVolNum'], reverse=True)
             grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
-            news_sorted = sorted(t_all, key=lambda x: x['NewsScore'], reverse=True)
+            news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
+            # 使用 `[:1000]` 將最高承載量推升至千筆，
+            # 對於動態產生的訊號 (c_hod 與 c_surge)，直接將新訊號接在原先陣列的前面，完美實現「舊資料往下擠」！
             config.MASTER_BRAIN.update({
-                "gappers": t_all[:20], 
-                "hod": c_hod[:50],
-                "surge": c_surge[:50],
-                "high_vol": high_vol_sorted[:20],       # 異常爆量區
-                "net_vol_leaders": net_vol_sorted[:20], # 多空量能戰
-                "grinders": grind_sorted[:20],          # 主力無量緩漲區
-                "news_leaders": news_sorted[:20],       # 新聞評分榜
-                "last_update": current_time_tw, "scan_count": count
+                "gappers": t_all[:1000], 
+                "hod": (c_hod + config.MASTER_BRAIN["hod"])[:1000],
+                "surge": (c_surge + config.MASTER_BRAIN["surge"])[:1000],
+                "high_vol": high_vol_sorted[:1000],       
+                "net_vol_leaders": net_vol_sorted[:1000], 
+                "grinders": grind_sorted[:1000],          
+                "news_leaders": news_sorted[:1000],       
+                "last_update": current_time_tw, 
+                "scan_count": count
             })
             
             cost_time = time.time() - loop_start_time
