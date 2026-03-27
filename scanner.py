@@ -158,12 +158,10 @@ def fetch_webull_gainers():
                     feed_gappers = feed_gappers[:1000]
                     auto_hot_symbols = auto_hot_symbols[:200] 
                 elif not data.get('data', []):
-                    # 💡 深夜靜音模式：不觸發紅色警報，而是用溫和的 info 提示
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ℹ️ Webull 目前無符合條件之股票 (可能為深夜無交易)，切換備用雷達...")
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ℹ️ 盤前無足夠交易量 (Webull 篩選為空)，切換備用雷達...")
                     raise ValueError("深夜靜音模式切換")
                     
         except Exception as e:
-            # 避免印出刺眼的 Exception 錯誤，保持日誌乾淨
             if "深夜靜音模式切換" not in str(e):
                 print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗，啟動備用雷達...")
                 
@@ -236,7 +234,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8.8 (加入漲跌金額 + 深夜降噪版)...")
+    print("🔥 啟動 V9.0 (排版記憶 + 全面漲跌金額擴充)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -377,9 +375,11 @@ def scanner_engine():
                             cell["max_news_score"] += 10 
                             break
                 
+                # ✨ 在 Yahoo 輸出的所有名單也確實加上 ChangeAmt 變數
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                    "Change": change_str, "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
+                    "ChangeAmt": chg_amt_str, "Change": change_str, 
+                    "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
                     "RVOL": f"{rvol:.1f}x", "FloatStr": float_str, "Streak": streak_text,
                     "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
@@ -396,7 +396,6 @@ def scanner_engine():
                     threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"; cell["last_price"] = p_num
-                
                 cell["RVOL"] = f"{rvol:.1f}x"
                 cell["FloatStr"] = float_str
                 
@@ -425,7 +424,6 @@ def scanner_engine():
                 "scan_count": count
             })
             
-            # 取消多餘的追蹤 log 保持畫面整潔
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
