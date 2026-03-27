@@ -50,28 +50,19 @@ def get_static(ticker):
 
 def format_vol_km(v_float):
     try:
+        # 強制脫殼處理，清除所有逗號與非數字字元
+        if isinstance(v_float, str):
+            v_float = v_float.replace(',', '').replace('M', '000000').replace('K', '000').strip()
         v_float = float(v_float)
+        
         if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
         elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
         else: return f"{int(v_float)}"
     except:
         return "0K"
 
-def update_or_add_gapper(new_entry):
-    global feed_gappers
-    # ✨ 核心修復：尋找表格中是否已有此股票，若有則更新數據並移到最上方（下捲）
-    for i, entry in enumerate(feed_gappers):
-        if entry['Code'] == new_entry['Code']:
-            # 如果數據真的有變動，才推到最上方
-            if entry['Price'] != new_entry['Price'] or entry['Volume'] != new_entry['Volume']:
-                feed_gappers.pop(i)
-                feed_gappers.insert(0, new_entry)
-            return
-    # 如果是全新的股票，直接加在最上方
-    feed_gappers.insert(0, new_entry)
-
 # ==========================================
-# ★ 核心模組 1：Webull 主引擎 & 萬能備用雷達
+# ★ Webull 主引擎 & 萬能備用雷達
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -80,7 +71,7 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 主引擎掃描中 ({market_status})...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 掃描中 ({market_status})...")
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -114,7 +105,7 @@ def fetch_webull_gainers():
                 browser.close()
                 
                 new_found = []
-                for item in data.get('data', []):
+                for item in reversed(data.get('data', [])):
                     sym = item.get('ticker', {}).get('symbol')
                     if sym and '-' not in sym:
                         if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
@@ -146,17 +137,17 @@ def fetch_webull_gainers():
                             "FloatStr": float_str,
                             "discovery_time": time.time()
                         }
-                        update_or_add_gapper(new_entry)
+                        # 🚨 徹底解除重複封鎖，無條件插入最上方！
+                        feed_gappers.insert(0, new_entry)
                 
                 if new_found:
                     feed_gappers = feed_gappers[:1000]
                     auto_hot_symbols = auto_hot_symbols[:200] 
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 擷取完畢")
                 elif not data.get('data', []):
                     raise ValueError("Webull 篩選回傳空值")
                     
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗 ({e})，啟動備用雷達...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗，啟動備用雷達...")
             try:
                 rank_type, _ = get_market_rank_type()
                 if rank_type == "2": url = "https://stockanalysis.com/markets/premarket/"
@@ -173,8 +164,9 @@ def fetch_webull_gainers():
                     vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
                     
                     new_found = []
-                    for idx, row in df.iterrows():
-                        if idx > 29: break
+                    # 使用 reversed 確保讀取順序是由下而上，這樣 insert(0) 才會讓第一名在最上面
+                    for idx, row in df.iloc[::-1].iterrows():
+                        if idx > 29: continue
                         sym = str(row.get('Symbol', ''))
                         if sym and '-' not in sym:
                             if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
@@ -185,9 +177,7 @@ def fetch_webull_gainers():
                             
                             p_val = str(row[price_col]) if price_col and pd.notna(row[price_col]) else '0'
                             c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
-                            
-                            # 處理交易量字串（將逗號清除）
-                            v_val_str = str(row[vol_col]).replace(',', '') if vol_col and pd.notna(row[vol_col]) else '0'
+                            v_val_str = str(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else '0'
                             
                             new_entry = {
                                 "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
@@ -195,31 +185,29 @@ def fetch_webull_gainers():
                                 "Price": f"${p_val}" if not p_val.startswith('$') else p_val,
                                 "Change": c_val if '%' in c_val else f"{c_val}%",
                                 "Volume": format_vol_km(v_val_str),
-                                "RVOL": "補齊中...",
+                                "RVOL": "計算中...",
                                 "FloatStr": float_str,
                                 "discovery_time": time.time()
                             }
-                            update_or_add_gapper(new_entry)
+                            # 🚨 徹底解除重複封鎖，無條件插入最上方！
+                            feed_gappers.insert(0, new_entry)
                             
                     if new_found:
                         feed_gappers = feed_gappers[:1000]
                         auto_hot_symbols = auto_hot_symbols[:200]
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達擷取完畢")
             except Exception as ex:
                 pass
                 
-        delay = random.randint(4, 12)
-        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ 雷達休眠 {delay} 秒...")
-        time.sleep(delay)
+        time.sleep(random.randint(4, 12))
 
 # ==========================================
-# ★ 核心模組 2：Yahoo 副引擎 (精算與回補)
+# ★ Yahoo 副引擎 (精算與回補)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8.5 動態更新與精準欄位版...")
+    print("🔥 啟動 V8.6 (瀑布流強制排序 + K/M 脫殼版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -232,14 +220,11 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0:
-                    print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中...")
-                wait_count += 1
-                time.sleep(2)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 狙擊鏡待命中...")
+                wait_count += 1; time.sleep(2)
                 continue
                 
             wait_count = 0
-            
             data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10)
             
             extracted_stocks = []
@@ -276,14 +261,14 @@ def scanner_engine():
                 f, a, prev_close = get_static(sym)
                 float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                 
-                # ✨ 雙重核對回補：只要漏掉，Yahoo 立刻精準補上
+                # 雙重核對回補
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
                         if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']:
                             gap_entry['Price'] = f"${p_num:.2f}"
                         if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0":
                             gap_entry['Volume'] = format_vol_km(vol_raw)
-                        if "雷達" in gap_entry['RVOL'] or "補齊" in gap_entry['RVOL']:
+                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL']:
                             gap_entry['RVOL'] = f"{rvol:.1f}x"
                         if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0":
                             chg = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
@@ -320,7 +305,6 @@ def scanner_engine():
                 
                 if p_num > recent_high:
                     if is_pullback:
-                        swing_size = recent_high - surge_start_price
                         pb_low = cell.get("pullback_low", p_num)
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
@@ -352,9 +336,8 @@ def scanner_engine():
 
                 has_catalyst = False
                 for news in cell.get("NewsList", []):
-                    title_upper = news.get("title", "").upper()
                     for kw in CATALYST_KEYWORDS:
-                        if kw in title_upper:
+                        if kw in news.get("title", "").upper():
                             has_catalyst = True
                             cell["max_news_score"] += 10 
                             break
@@ -363,16 +346,12 @@ def scanner_engine():
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "Change": "Yahoo", "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
                     "RVOL": f"{rvol:.1f}x", "FloatStr": float_str, "Streak": streak_text,
-                    "NetVolNum": net_vol, 
-                    "NewsScore": cell["max_news_score"],
-                    "HasCatalyst": has_catalyst, 
+                    "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
-                    "BuyVolStr": format_vol_km(cell["cum_buy_vol"]),
-                    "SellVolStr": format_vol_km(cell["cum_sell_vol"])
+                    "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"])
                 }
 
                 t_all.append(item)
-                
                 if is_hod_break: feed_hod.insert(0, item)
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break): feed_surge.insert(0, item)
 
@@ -385,9 +364,11 @@ def scanner_engine():
                 config.MASTER_BRAIN["details"][sym] = cell
 
             count += 1
-            
             feed_hod = feed_hod[:1000]
             feed_surge = feed_surge[:1000]
+            
+            # 🚨 排序核心：嚴格依據 discovery_time (發現時間) 由最新到最舊排序，確保下捲！
+            gappers_sorted = sorted(feed_gappers, key=lambda x: x.get("discovery_time", 0), reverse=True)
             
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
@@ -396,7 +377,7 @@ def scanner_engine():
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
             config.MASTER_BRAIN.update({
-                "gappers": feed_gappers,                 
+                "gappers": gappers_sorted[:1000],                 
                 "hod": feed_hod,                         
                 "surge": feed_surge,                       
                 "high_vol": high_vol_sorted[:1000],       
@@ -406,13 +387,7 @@ def scanner_engine():
                 "last_update": current_time_tw, 
                 "scan_count": count
             })
-            
-            cost_time = time.time() - loop_start_time
-            if len(t_all) > 0:
-                print(f"[{current_time_tw}] ⏱️ 狙擊完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
-            
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生例外錯誤：{e}")
             time.sleep(5)
