@@ -9,6 +9,15 @@ from io import StringIO
 import config
 from news_engine import fetch_news_bg
 
+# 🛡️ 補回：Cloudscraper 破甲防護模組
+try:
+    import cloudscraper
+    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+    print("🛡️ 已啟動 Cloudscraper 破甲模式！")
+except ImportError:
+    scraper = requests.Session()
+    scraper.headers.update({"User-Agent": "Mozilla/5.0"})
+
 auto_hot_symbols = []       
 feed_gappers = []           
 feed_hod = []               
@@ -170,8 +179,9 @@ def fetch_webull_gainers():
                 if rank_type == "2": url = "https://stockanalysis.com/markets/premarket/"
                 elif rank_type == "1": url = "https://stockanalysis.com/markets/after-hours/"
                 else: url = "https://stockanalysis.com/markets/gainers/"
-                    
-                res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+                
+                # 🛡️ 這裡套用破甲防護模組
+                res = scraper.get(url, timeout=15)
                 df_list = pd.read_html(StringIO(res.text))
                 
                 if df_list:
@@ -234,7 +244,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V9.1 (歷史殘留資料自癒版)...")
+    print("🔥 啟動 V10 終極版 (Ross 戰法靈魂注入)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -244,7 +254,6 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # ✨ 自癒機制：主動掃描表格中的歷史舊資料，強制補上遺漏的 FloatStr 
             for gap_entry in feed_gappers:
                 if "FloatStr" not in gap_entry or "ChangeAmt" not in gap_entry:
                     f, _, _ = get_static(gap_entry['Code'])
@@ -286,6 +295,9 @@ def scanner_engine():
             t_all = []
             current_t = time.time()
             
+            # 📊 緩漲名單 (Grinders) 的專用存放區
+            active_grinders = []
+            
             for data in extracted_stocks:
                 sym = data['sym']
                 p_num = data['price']
@@ -322,7 +334,8 @@ def scanner_engine():
                     "HOD": initial_hod, "NewsList": [], "max_news_score": 0, "streak": 0, 
                     "last_price": p_num, "cum_buy_vol": 0, "cum_sell_vol": 0, "is_grinder": False,
                     "recent_high": initial_hod, "is_pullback": False, "sniper_triggered": False,
-                    "surge_start_price": initial_hod, "max_surge_vol": 0, "pullback_low": p_num, "sniper_label": ""
+                    "surge_start_price": initial_hod, "max_surge_vol": 0, "pullback_low": p_num, "sniper_label": "",
+                    "pos_vol_streak": 0, "neg_vol_streak": 0, "GrindCount": 0, "last_vol_delta": 0
                 })
                 
                 is_hod_break = False
@@ -331,26 +344,63 @@ def scanner_engine():
                 last_price = cell.get("last_price", p_num)
                 curr_vol_delta = vol_raw
                 
+                # 📊 補回：主力無量緩漲 (Grinders) 演算法
                 if curr_vol_delta > 0:
-                    if p_num > last_price: cell["cum_buy_vol"] += curr_vol_delta
-                    elif p_num < last_price: cell["cum_sell_vol"] += curr_vol_delta
+                    if p_num > last_price:
+                        cell["cum_buy_vol"] += curr_vol_delta
+                        cell["pos_vol_streak"] += 1
+                        cell["neg_vol_streak"] = 0
+                        cell["GrindCount"] += 1
+                    elif p_num < last_price:
+                        cell["cum_sell_vol"] += curr_vol_delta
+                        cell["neg_vol_streak"] += 1
+                        cell["pos_vol_streak"] = 0
+                        cell["GrindCount"] -= 1
                 net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
+
+                # 判斷是否為無量緩漲
+                if cell["GrindCount"] >= 3 and cell["pos_vol_streak"] >= 3 and vol_raw < 500000:
+                    cell["is_grinder"] = True
+                    active_grinders.append({
+                        "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
+                        "Streak": f"🔥無量緩推(連{cell['pos_vol_streak']}分)",
+                        "ChangeAmt": chg_amt_str, "Change": change_str,
+                        "GrindCount": cell["GrindCount"]
+                    })
+                elif cell["GrindCount"] <= -2:
+                    cell["is_grinder"] = False
 
                 recent_high = cell.get("recent_high", initial_hod)
                 surge_start_price = cell.get("surge_start_price", initial_hod)
                 is_pullback = cell.get("is_pullback", False)
+                max_surge_vol = cell.get("max_surge_vol", 0)
                 sniper_triggered = False
                 sniper_label = ""
                 
+                # 🎯 補回：精準回調、爆量、虛漲陷阱的多重判斷邏輯
                 if p_num > recent_high:
                     if is_pullback:
                         pb_low = cell.get("pullback_low", p_num)
+                        # 紫色警告：精準回調 (Pullback 反彈)
                         if p_num > pb_low * 1.01: 
                             sniper_triggered = True
-                            sniper_label = "⚡極速(9EMA)"
+                            sniper_label = "🎯精準回調"
                         is_pullback = False
-                        surge_start_price = p_num 
+                        surge_start_price = p_num
+                        max_surge_vol = curr_vol_delta
+                    else:
+                        max_surge_vol = max(max_surge_vol, curr_vol_delta)
                     recent_high = p_num
+                    
+                    # 判斷破高時的異常狀態
+                    if is_hod_break:
+                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0:
+                            sniper_triggered = True
+                            sniper_label = "⚠️爆量(短線留意)"
+                        elif curr_vol_delta > 0 and curr_vol_delta < 5000:
+                            sniper_triggered = True
+                            sniper_label = "⚠️虛漲(無量誘多)"
+                            
                 elif p_num < last_price:
                     swing_size = recent_high - surge_start_price
                     retrace_ratio = (recent_high - p_num) / swing_size if swing_size > 0 else 0
@@ -369,9 +419,13 @@ def scanner_engine():
                 cell["sniper_triggered"] = sniper_triggered
                 if sniper_triggered: cell["sniper_label"] = sniper_label
                 
+                # 根據訊號強度覆寫標籤
                 streak_text = f"x{cell['streak']}"
-                if is_hod_break: streak_text = f"⭐破高{streak_text}"
-                elif sniper_triggered: streak_text = f"{cell['sniper_label']}"
+                if is_hod_break: 
+                    if sniper_triggered: streak_text = f"⭐破高+{cell['sniper_label']}"
+                    else: streak_text = f"⭐破高{streak_text}"
+                elif sniper_triggered: 
+                    streak_text = f"{cell['sniper_label']}"
 
                 has_catalyst = False
                 for news in cell.get("NewsList", []):
@@ -393,7 +447,12 @@ def scanner_engine():
 
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
-                if sniper_triggered or (cell["streak"] >= 2 and is_hod_break): feed_surge.insert(0, item)
+                
+                # 🎯 極速(9EMA) 邏輯：連兩次破高且量能充沛，或觸發了紫橘色警報
+                if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > 10000):
+                    if not sniper_triggered: 
+                        item["Streak"] = "⚡極速(9EMA)"
+                    feed_surge.insert(0, item)
 
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
@@ -413,7 +472,7 @@ def scanner_engine():
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
             net_vol_sorted = sorted(t_all, key=lambda x: x['NetVolNum'], reverse=True)
-            grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
+            grind_sorted = sorted(active_grinders, key=lambda x: x.get("GrindCount", 0), reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
             config.MASTER_BRAIN.update({
