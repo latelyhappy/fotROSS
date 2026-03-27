@@ -53,7 +53,8 @@
         <button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button>
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
         <span style="color: #00ff00; margin-left: 20px; font-weight: bold;">⚡ 手動極速鎖定:</span>
-        <input type="text" id="sniperInput" placeholder="代碼 (例: MGRX)" style="padding: 5px; font-size: 14px; text-transform: uppercase; background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 4px; width: 120px; font-family: Consolas, monospace; outline: none; margin-left: 5px;">
+        <input type="text" id="sniperInput" list="sniperHistoryList" placeholder="代碼 (例: MGRX)" autocomplete="off" style="padding: 5px; font-size: 14px; text-transform: uppercase; background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 4px; width: 120px; font-family: Consolas, monospace; outline: none; margin-left: 5px;">
+        <datalist id="sniperHistoryList"></datalist>
         <button id="sniperBtn" onclick="addTarget()" style="padding: 5px 15px; font-size: 14px; background: #00ff00; color: #000; cursor: pointer; font-weight: bold; border: none; border-radius: 4px; margin-left: 5px;">🎯 鎖定</button>
     </div>
     
@@ -81,13 +82,34 @@
         let activeSymbol = "";
 
         // =====================================
-        // 🎯 手動極速鎖定目標 (V4.0 新增)
+        // 💡 融合區：1000筆對話框歷史紀錄 (LocalStorage) 
         // =====================================
+        let sniperHistory = JSON.parse(localStorage.getItem('rossSniperHistory') || '[]');
+
+        function updateSniperDropdown() {
+            const dl = document.getElementById('sniperHistoryList');
+            if (!dl) return;
+            dl.innerHTML = '';
+            sniperHistory.forEach(sym => {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                dl.appendChild(opt);
+            });
+        }
+        updateSniperDropdown();
+
         function addTarget() {
             let tickerInput = document.getElementById('sniperInput');
             let ticker = tickerInput.value.trim().toUpperCase();
             if (!ticker) return;
             
+            if (!sniperHistory.includes(ticker)) {
+                sniperHistory.unshift(ticker);
+                if (sniperHistory.length > 1000) sniperHistory.pop();
+                localStorage.setItem('rossSniperHistory', JSON.stringify(sniperHistory));
+                updateSniperDropdown();
+            }
+
             let btn = document.getElementById('sniperBtn');
             let oldText = btn.innerText;
             btn.innerText = "⏳...";
@@ -102,35 +124,22 @@
                 if(data.status === 'success') {
                     btn.innerText = "✅ " + data.ticker;
                     btn.style.background = "#fff";
-                    setTimeout(() => {
-                        btn.innerText = oldText;
-                        btn.style.background = "#00ff00";
-                    }, 2000);
+                    setTimeout(() => { btn.innerText = oldText; btn.style.background = "#00ff00"; }, 2000);
                     tickerInput.value = '';
                 } else {
                     btn.innerText = "❌";
                     btn.style.background = "#ff3333";
-                    setTimeout(() => {
-                        btn.innerText = oldText;
-                        btn.style.background = "#00ff00";
-                    }, 2000);
+                    setTimeout(() => { btn.innerText = oldText; btn.style.background = "#00ff00"; }, 2000);
                 }
-            })
-            .catch(err => {
-                console.error("鎖定失敗:", err);
-                btn.innerText = oldText;
-            });
+            }).catch(err => { console.error("鎖定失敗:", err); btn.innerText = oldText; });
         }
 
         document.getElementById("sniperInput").addEventListener("keypress", function(event) {
-            if (event.key === "Enter") {
-                event.preventDefault();
-                addTarget();
-            }
+            if (event.key === "Enter") { event.preventDefault(); addTarget(); }
         });
 
         // =====================================
-        // 啟動拖曳與縮放等
+        // 視窗拖曳與控制邏輯 (完全保留)
         // =====================================
         function changeZoom(delta) {
             currentZoom += delta;
@@ -179,7 +188,6 @@
             }
         }
 
-        // --- 視窗拖曳與縮放邏輯 ---
         document.querySelectorAll('.window').forEach(win => {
             const titleBar = win.querySelector('.title-bar');
             const handle = win.querySelector('.resize-handle');
@@ -227,8 +235,9 @@
             });
         });
 
-        // --- 與後端通訊邏輯 ---
-        function openTW(sym) {
+        // 💡 融合區：防止雙擊事件干擾單擊
+        function openTW(sym, event) {
+            if(event) event.stopPropagation();
             window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank');
         }
 
@@ -252,7 +261,10 @@
                 html += `<tr ${styleStr} onclick="loadDetail('${row.Code}')">`;
                 cols.forEach(c => {
                     let val = row[c.k] || '';
-                    if (c.k === 'Code') val = `<span class="sym">${val}</span>`;
+                    // 💡 融合區：加入雙擊開啟 TradingView 功能
+                    if (c.k === 'Code') {
+                        val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊立刻開啟 TradingView">${val}</span>`;
+                    }
                     if (c.k === 'Change' && typeof val === 'string') {
                         if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
                         else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
@@ -362,7 +374,9 @@
                     }
                 });
             } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
-            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}')" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
+            
+            // 💡 融合區：右下角的巨大代碼也保留雙擊開啟 TW 的功能
+            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
         // ★ 效能優化：前端降速至每 5 秒刷新一次 (5000 毫秒)
