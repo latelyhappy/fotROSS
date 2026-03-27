@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V8.5 - 終極實戰版</title>
+    <title>ROSS Sniper V8.6 - 終極實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -54,16 +54,16 @@
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
     </div>
     
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:450px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-vol" style="top:300px; left:10px; width:450px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-netvol" style="top:590px; left:10px; width:450px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:480px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-vol" style="top:300px; left:10px; width:480px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-netvol" style="top:590px; left:10px; width:480px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-surge" style="top:10px; left:470px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-hod" style="top:450px; left:470px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:500px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:450px; left:500px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-news-score" style="top:10px; left:980px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-grind" style="top:300px; left:980px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:590px; left:980px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-news-score" style="top:10px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-grind" style="top:300px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:590px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
     
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
@@ -77,110 +77,32 @@
         let brainDetailsCache = {};
         let activeSymbol = "";
 
-        function changeZoom(delta) {
-            currentZoom += delta;
-            if(currentZoom < 0.5) currentZoom = 0.5;
-            if(currentZoom > 2.0) currentZoom = 2.0;
-            document.body.style.transform = `scale(${currentZoom})`;
-        }
-        function resetZoom() {
-            currentZoom = 1.0;
-            document.body.style.transform = `scale(1.0)`;
-        }
-        function toggleGlobalLock() {
-            isGlobalLocked = !isGlobalLocked;
-            const btn = document.getElementById('lock-btn');
-            if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";}
-            else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";}
-        }
+        function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
+        function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
+        function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
         function toggleEngineRun() {
-            isEngineRunning = !isEngineRunning;
-            const btn = document.getElementById('engine-btn');
-            const statusEl = document.getElementById('sys-status');
-            if(isEngineRunning) {
-                btn.innerText = "⏹️ 停止掃描"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";
-                statusEl.innerHTML = '🔄 掃描引擎連線中...';
-                refresh();
-            } else {
-                btn.innerText = "▶️ 恢復掃描"; btn.style.background = "#3fb950"; btn.style.color="white";
-                statusEl.innerHTML = '⏸️ 系統已暫停更新';
-            }
+            isEngineRunning = !isEngineRunning; const btn = document.getElementById('engine-btn'); const statusEl = document.getElementById('sys-status');
+            if(isEngineRunning) { btn.innerText = "⏹️ 停止掃描"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9"; statusEl.innerHTML = '🔄 掃描引擎連線中...'; refresh(); } 
+            else { btn.innerText = "▶️ 恢復掃描"; btn.style.background = "#3fb950"; btn.style.color="white"; statusEl.innerHTML = '⏸️ 系統已暫停更新'; }
         }
         function togglePause(e) {
-            e.stopPropagation();
-            isHodPaused = !isHodPaused;
-            const btn = document.getElementById('pause-btn');
-            if(isHodPaused) {
-                btn.innerText = "▶️ 恢復滾動"; btn.style.background = "#3fb950"; btn.style.borderColor = "#3fb950"; btn.style.animation = "none";
-            } else {
-                btn.innerText = "⏸️ 暫停滾動"; btn.style.background = "#f85149"; btn.style.borderColor = "#f85149"; btn.style.animation = "pulseRed 2s infinite";
-                renderHOD(lastKnownHodData); 
-            }
+            e.stopPropagation(); isHodPaused = !isHodPaused; const btn = document.getElementById('pause-btn');
+            if(isHodPaused) { btn.innerText = "▶️ 恢復滾動"; btn.style.background = "#3fb950"; btn.style.borderColor = "#3fb950"; btn.style.animation = "none"; } 
+            else { btn.innerText = "⏸️ 暫停滾動"; btn.style.background = "#f85149"; btn.style.borderColor = "#f85149"; btn.style.animation = "pulseRed 2s infinite"; renderHOD(lastKnownHodData); }
         }
 
         document.querySelectorAll('.window').forEach(win => {
-            const titleBar = win.querySelector('.title-bar');
-            const handle = win.querySelector('.resize-handle');
-            let isDragging = false, isResizing = false;
-            let startX, startY, startLeft, startTop, startWidth, startHeight;
-
-            titleBar.addEventListener('mousedown', (e) => {
-                if (e.target.tagName.toLowerCase() === 'button') return;
-                if(isGlobalLocked) return;
-                isDragging = true;
-                startX = e.clientX / currentZoom; startY = e.clientY / currentZoom;
-                startLeft = parseInt(window.getComputedStyle(win).left, 10);
-                startTop = parseInt(window.getComputedStyle(win).top, 10);
-                win.style.zIndex = 100;
-            });
-
-            handle.addEventListener('mousedown', (e) => {
-                if(isGlobalLocked) return;
-                isResizing = true;
-                startX = e.clientX / currentZoom; startY = e.clientY / currentZoom;
-                startWidth = parseInt(window.getComputedStyle(win).width, 10);
-                startHeight = parseInt(window.getComputedStyle(win).height, 10);
-                win.style.zIndex = 100;
-                e.stopPropagation();
-            });
-
-            document.addEventListener('mousemove', (e) => {
-                if (isDragging) {
-                    const dx = (e.clientX / currentZoom) - startX;
-                    const dy = (e.clientY / currentZoom) - startY;
-                    win.style.left = `${startLeft + dx}px`; win.style.top = `${startTop + dy}px`;
-                } else if (isResizing) {
-                    const dx = (e.clientX / currentZoom) - startX;
-                    const dy = (e.clientY / currentZoom) - startY;
-                    win.style.width = `${Math.max(200, startWidth + dx)}px`; win.style.height = `${Math.max(100, startHeight + dy)}px`;
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                if (isDragging || isResizing) win.style.zIndex = 1;
-                isDragging = false; isResizing = false;
-            });
+            const titleBar = win.querySelector('.title-bar'); const handle = win.querySelector('.resize-handle');
+            let isDragging = false, isResizing = false; let startX, startY, startLeft, startTop, startWidth, startHeight;
+            titleBar.addEventListener('mousedown', (e) => { if (e.target.tagName.toLowerCase() === 'button') return; if(isGlobalLocked) return; isDragging = true; startX = e.clientX / currentZoom; startY = e.clientY / currentZoom; startLeft = parseInt(window.getComputedStyle(win).left, 10); startTop = parseInt(window.getComputedStyle(win).top, 10); win.style.zIndex = 100; });
+            handle.addEventListener('mousedown', (e) => { if(isGlobalLocked) return; isResizing = true; startX = e.clientX / currentZoom; startY = e.clientY / currentZoom; startWidth = parseInt(window.getComputedStyle(win).width, 10); startHeight = parseInt(window.getComputedStyle(win).height, 10); win.style.zIndex = 100; e.stopPropagation(); });
+            document.addEventListener('mousemove', (e) => { if (isDragging) { const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY; win.style.left = `${startLeft + dx}px`; win.style.top = `${startTop + dy}px`; } else if (isResizing) { const dx = (e.clientX / currentZoom) - startX; const dy = (e.clientY / currentZoom) - startY; win.style.width = `${Math.max(200, startWidth + dx)}px`; win.style.height = `${Math.max(100, startHeight + dy)}px`; } });
+            document.addEventListener('mouseup', () => { if (isDragging || isResizing) win.style.zIndex = 1; isDragging = false; isResizing = false; });
         });
 
-        function openTW(sym, event) {
-            if(event) event.stopPropagation(); 
-            window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank');
-        }
+        function openTW(sym, event) { if(event) event.stopPropagation(); window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank'); }
+        function markRead(newsId, link) { fetch('/mark_read', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: newsId}) }).then(() => { if(link !== '#') window.open(link, '_blank'); refresh(); }); }
 
-        function markRead(newsId, link) {
-            fetch('/mark_read', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: newsId})
-            }).then(() => {
-                if(link !== '#') window.open(link, '_blank');
-                refresh();
-            });
-        }
-
-        // =====================================
-        // ✨ 表格引擎：保留捲軸與字體換色
-        // =====================================
         function renderTable(containerId, data, cols, styleFunc=null) {
             const container = document.getElementById(containerId);
             const oldScrollTop = container.scrollTop;
@@ -196,6 +118,7 @@
                     if (c.k === 'Code') {
                         val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊開啟 TradingView">${val}</span>`;
                     }
+                    // 🚨 完美保留您舊版最愛的「紅綠漲跌換色機制」
                     if (c.k === 'Change' && typeof val === 'string') {
                         if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
                         else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
@@ -229,10 +152,7 @@
             if(!isEngineRunning) return;
             const ts = new Date().getTime();
             fetch('/data?t=' + ts)
-                .then(r => {
-                    if(!r.ok) throw new Error("HTTP error " + r.status);
-                    return r.json();
-                })
+                .then(r => r.json())
                 .then(d => {
                     lastSuccessfulFetchTime = Date.now();
                     document.getElementById('sys-status').innerHTML = `🟢 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
@@ -241,11 +161,11 @@
 
                     brainDetailsCache = d.details || {};
 
-                    // ★ 完美補齊：時間, 代碼, 價格, 漲跌%, 交易量, 量比, 浮動股
+                    // 🚨 跳空榜精確 7 欄位配置，總和 100%，完美對齊不跑版！
                     renderTable('gap-list', d.gappers, [
                         {n:'時間', k:'Time', w:'14%'}, {n:'代碼', k:'Code', w:'12%'},
-                        {n:'價格', k:'Price', w:'14%'}, {n:'漲跌%', k:'Change', w:'14%'},
-                        {n:'交易量', k:'Volume', w:'16%'}, {n:'量比', k:'RVOL', w:'14%'},
+                        {n:'價格', k:'Price', w:'14%'}, {n:'交易量', k:'Volume', w:'16%'},
+                        {n:'量比', k:'RVOL', w:'14%'}, {n:'漲跌%', k:'Change', w:'14%'},
                         {n:'浮動股', k:'FloatStr', w:'16%'}
                     ]);
                     
@@ -282,20 +202,13 @@
                         {n:'淨買賣', k:'NetVolStr', w:'20%'}, {n:'主買(Buy)', k:'BuyVolStr', w:'20%'}, {n:'主賣(Sell)', k:'SellVolStr', w:'20%'}
                     ]);
 
-                    if(activeSymbol && brainDetailsCache[activeSymbol]) {
-                        loadDetail(activeSymbol);
-                    }
+                    if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
                 })
-                .catch(err => {
-                    console.error(err);
-                });
+                .catch(err => console.error(err));
         }
 
         function loadDetail(sym) {
-            activeSymbol = sym;
-            const d = brainDetailsCache[sym];
-            if(!d) return;
-            
+            activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
             let newsHTML = '<div style="margin-top:10px; font-weight:bold; border-bottom:1px solid #30363d; padding-bottom:3px; margin-bottom:5px;">即時新聞與催化劑</div>';
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
@@ -311,7 +224,6 @@
         }
 
         setInterval(refresh, 5000);
-
         setInterval(() => {
             const statusEl = document.getElementById('sys-status');
             if (isEngineRunning && (Date.now() - lastSuccessfulFetchTime > 15000)) {
@@ -320,7 +232,6 @@
                 statusEl.style.color = '#fff';
             }
         }, 1000);
-        
         refresh();
     </script>
 </body>
