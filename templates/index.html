@@ -52,10 +52,7 @@
         <button onclick="resetZoom()">🔄 重置</button>
         <button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button>
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
-        <span style="color: #00ff00; margin-left: 20px; font-weight: bold;">⚡ 手動極速鎖定:</span>
-        <input type="text" id="sniperInput" list="sniperHistoryList" placeholder="代碼 (例: MGRX)" autocomplete="off" style="padding: 5px; font-size: 14px; text-transform: uppercase; background: #000; color: #00ff00; border: 1px solid #00ff00; border-radius: 4px; width: 120px; font-family: Consolas, monospace; outline: none; margin-left: 5px;">
-        <datalist id="sniperHistoryList"></datalist>
-        <button id="sniperBtn" onclick="addTarget()" style="padding: 5px 15px; font-size: 14px; background: #00ff00; color: #000; cursor: pointer; font-weight: bold; border: none; border-radius: 4px; margin-left: 5px;">🎯 鎖定</button>
+        
     </div>
     
     <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
