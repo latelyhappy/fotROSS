@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V9.2 - 完美排版與大畫布版</title>
+    <title>ROSS Sniper V9.3 - 穩定排版記憶版</title>
     <style>
         /* 🚨 魔法 1：將頁面高度增加 1.5 倍 (150vh)，並允許上下捲動 (overflow-y: auto) */
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
@@ -80,7 +80,7 @@
         let activeSymbol = "";
 
         // =====================================
-        // ✨ 魔法 2：強化版強制排版記憶引擎
+        // ✨ 自動儲存與讀取排版引擎 (LocalStorage 原生寫法)
         // =====================================
         function saveLayout() {
             const layout = {};
@@ -102,11 +102,11 @@
                     const layout = JSON.parse(layoutStr);
                     document.querySelectorAll('.window').forEach(win => {
                         if (layout[win.id]) {
-                            // 強制讀取並覆寫預設的 inline style
-                            if (layout[win.id].top) win.style.setProperty('top', layout[win.id].top, 'important');
-                            if (layout[win.id].left) win.style.setProperty('left', layout[win.id].left, 'important');
-                            if (layout[win.id].width) win.style.setProperty('width', layout[win.id].width, 'important');
-                            if (layout[win.id].height) win.style.setProperty('height', layout[win.id].height, 'important');
+                            // 直接覆寫元素的 style，這是最穩定的原生存檔讀取方式
+                            if (layout[win.id].top) win.style.top = layout[win.id].top;
+                            if (layout[win.id].left) win.style.left = layout[win.id].left;
+                            if (layout[win.id].width) win.style.width = layout[win.id].width;
+                            if (layout[win.id].height) win.style.height = layout[win.id].height;
                         }
                     });
                 } catch(e) { console.error("Layout load error", e); }
@@ -166,7 +166,7 @@
             }
         });
 
-        // 滑鼠放開時立即存檔
+        // ✨ 滑鼠「放開拖曳」的瞬間立刻執行存檔
         document.addEventListener('mouseup', () => {
             if (activeWin && (isDragging || isResizing)) {
                 activeWin.style.zIndex = 1;
@@ -284,9 +284,6 @@
                     ]);
 
                     if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
-                    
-                    // ✨ 每次資料更新完，強制背景存檔排版，確保萬無一失！
-                    saveLayout();
                 })
                 .catch(err => console.error(err));
         }
@@ -307,8 +304,11 @@
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        // 啟動時讀取排版
-        loadLayout();
+        // ✨ 網頁載入的第一瞬間，執行排版還原
+        window.onload = () => {
+            loadLayout();
+            refresh();
+        };
 
         setInterval(refresh, 5000);
         setInterval(() => {
@@ -319,7 +319,7 @@
                 statusEl.style.color = '#fff';
             }
         }, 1000);
-        refresh();
+        
     </script>
 </body>
 </html>
