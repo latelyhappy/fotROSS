@@ -136,7 +136,7 @@ def fetch_webull_gainers():
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動全自動防護版 (動態隨機延遲 + 手動拔除)...")
+    print("🔥 啟動全自動防護版 (多層防呆解析 + 千筆大容量)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -162,10 +162,19 @@ def scanner_engine():
             
             extracted_stocks = []
             if not data_df.empty:
-                is_single = len(symbols_to_track) == 1
+                # ★ 智慧多層防呆解析：防止 yfinance 因個別股票抓不到而自動降級維度
+                is_multi = isinstance(data_df.columns, pd.MultiIndex)
                 for sym in symbols_to_track:
                     try:
-                        latest_row = data_df.iloc[-1] if is_single else data_df.xs(sym, level=1, axis=1).iloc[-1]
+                        if is_multi:
+                            # 如果 yfinance 移除了該壞掉的股票，跳過它
+                            if sym not in data_df.columns.get_level_values(1):
+                                continue
+                            latest_row = data_df.xs(sym, level=1, axis=1).iloc[-1]
+                        else:
+                            # 如果剛好只成功抓到 1 支股票，它會自動降級成單層
+                            latest_row = data_df.iloc[-1]
+                            
                         price = float(latest_row['Close'])
                         vol = float(latest_row['Volume'])
                         if pd.notna(price) and price > 0:
@@ -327,7 +336,7 @@ def scanner_engine():
             if len(t_all) > 0:
                 print(f"[{current_time_tw}] ⏱️ 狙擊完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
             
-            # ⏱️ 隨機延遲保護 (8秒 ± 4秒 = 4 ~ 12 秒)
+            # ⏱️ 動態隨機延遲 (8秒 ± 4秒 = 4 ~ 12 秒)
             delay = random.randint(4, 12)
             time.sleep(delay)
             
