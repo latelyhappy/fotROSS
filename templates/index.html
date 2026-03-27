@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V8.0 - 真下捲與精準數據版</title>
+    <title>ROSS Sniper V8.1 - 終極實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -78,7 +78,7 @@
         let activeSymbol = "";
 
         // =====================================
-        // 視窗拖曳與控制邏輯 (完全保留)
+        // 視窗與畫面控制邏輯
         // =====================================
         function changeZoom(delta) {
             currentZoom += delta;
@@ -174,8 +174,9 @@
             });
         });
 
+        // --- 與後端通訊邏輯 ---
         function openTW(sym, event) {
-            if(event) event.stopPropagation();
+            if(event) event.stopPropagation(); 
             window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank');
         }
 
@@ -191,13 +192,14 @@
         }
 
         // =====================================
-        // ✨ V8 魔法：記憶捲軸位置的下捲渲染器
+        // ✨ 表格渲染引擎 (完美下捲記憶捲軸)
         // =====================================
         function renderTable(containerId, data, cols, styleFunc=null) {
             const container = document.getElementById(containerId);
-            // 1. 記住更新前的捲軸位置 (ScrollTop)
-            const oldScrollTop = container.scrollTop;
             
+            // ★ 核心技巧：記住更新前的捲軸位置 (ScrollTop)
+            const oldScrollTop = container.scrollTop;
+
             let html = `<table><thead><tr>`;
             cols.forEach(c => html += `<th style="width:${c.w}">${c.n}</th>`);
             html += `</tr></thead><tbody>`;
@@ -207,7 +209,7 @@
                 cols.forEach(c => {
                     let val = row[c.k] || '';
                     if (c.k === 'Code') {
-                        val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊立刻開啟 TradingView">${val}</span>`;
+                        val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊立刻開啟 TradingView K線圖">${val}</span>`;
                     }
                     if (c.k === 'Change' && typeof val === 'string') {
                         if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
@@ -226,10 +228,10 @@
             });
             html += `</tbody></table>`;
             
-            // 2. 替換內容
+            // 寫入新資料
             container.innerHTML = html;
             
-            // 3. 瞬間把捲軸放回剛剛的位置！完美下捲體驗達成！
+            // ★ 核心技巧：瞬間還原捲軸位置，實現順暢不中斷的下捲查閱！
             container.scrollTop = oldScrollTop;
         }
 
@@ -260,10 +262,14 @@
 
                     brainDetailsCache = d.details || {};
 
+                    // ★ 確保 價格、量比、交易量、漲跌% 完整呈現
                     renderTable('gap-list', d.gappers, [
-                        {n:'時間', k:'Time', w:'18%'}, {n:'代碼', k:'Code', w:'18%'},
-                        {n:'價格', k:'Price', w:'18%'}, {n:'總量', k:'Volume', w:'18%'},
-                        {n:'漲幅', k:'Change', w:'18%'}
+                        {n:'時間', k:'Time', w:'14%'}, 
+                        {n:'代碼', k:'Code', w:'14%'},
+                        {n:'價格', k:'Price', w:'14%'}, 
+                        {n:'交易量', k:'Volume', w:'20%'},
+                        {n:'量比', k:'RVOL', w:'18%'},
+                        {n:'漲跌%', k:'Change', w:'20%'}
                     ]);
                     
                     renderTable('vol-list', d.high_vol, [
