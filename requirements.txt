@@ -1,9 +1,9 @@
 flask
-requests
+flask-cors
 yfinance
 pandas
 pytz
-playwright
+playwright==1.42.0
 beautifulsoup4
 lxml
 deep-translator
