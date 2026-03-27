@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V8.6 - 終極實戰版</title>
+    <title>ROSS Sniper V8.8 - 終極實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -54,16 +54,16 @@
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
     </div>
     
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:480px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-vol" style="top:300px; left:10px; width:480px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-netvol" style="top:590px; left:10px; width:480px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:500px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-vol" style="top:300px; left:10px; width:500px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-netvol" style="top:590px; left:10px; width:500px; height:280px;"><div class="title-bar bg-purple">7. 盤中多空量能戰 (Net Volume)</div><div class="content" id="netvol-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-surge" style="top:10px; left:500px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-hod" style="top:450px; left:500px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:520px; width:500px; height:430px; box-shadow: 0 0 20px rgba(156, 39, 176, 0.2); border: 1px solid #6e40c9;"><div class="title-bar bg-green">4. 短線動能追蹤 (Sniper 狙擊核心)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-hod" style="top:450px; left:520px; width:500px; height:420px;"><div class="title-bar bg-green">2. 突破今日新高 <button id="pause-btn" class="pause-btn" onclick="togglePause(event)">⏸️ 暫停滾動</button></div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-news-score" style="top:10px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-grind" style="top:300px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:590px; left:1010px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-news-score" style="top:10px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-purple">6. 催化劑新聞評分榜</div><div class="content" id="news-score-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-grind" style="top:300px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-blue">5. 主力無量緩漲</div><div class="content" id="grind-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:590px; left:1030px; width:440px; height:280px;"><div class="title-bar bg-dark">📊 戰情與新聞分析</div><div class="content" id="detail-list"><div style="padding:10px; color:#8b949e;">請點擊任何股票代碼以載入戰情報告...</div></div><div class="resize-handle"></div></div>
     
     <div id="sys-status">🔄 掃描引擎連線中...</div>
 
@@ -118,8 +118,7 @@
                     if (c.k === 'Code') {
                         val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊開啟 TradingView">${val}</span>`;
                     }
-                    // 🚨 完美保留您舊版最愛的「紅綠漲跌換色機制」
-                    if (c.k === 'Change' && typeof val === 'string') {
+                    if ((c.k === 'Change' || c.k === 'ChangeAmt') && typeof val === 'string') {
                         if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
                         else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
                     }
@@ -161,12 +160,12 @@
 
                     brainDetailsCache = d.details || {};
 
-                    // 🚨 跳空榜精確 7 欄位配置，總和 100%，完美對齊不跑版！
+                    // 🚨 加入 ChangeAmt (漲跌$) 欄位，共 8 欄完美配置
                     renderTable('gap-list', d.gappers, [
-                        {n:'時間', k:'Time', w:'14%'}, {n:'代碼', k:'Code', w:'12%'},
-                        {n:'價格', k:'Price', w:'14%'}, {n:'交易量', k:'Volume', w:'16%'},
-                        {n:'量比', k:'RVOL', w:'14%'}, {n:'漲跌%', k:'Change', w:'14%'},
-                        {n:'浮動股', k:'FloatStr', w:'16%'}
+                        {n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'12%'},
+                        {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'13%'},
+                        {n:'漲跌%', k:'Change', w:'13%'}, {n:'交易量', k:'Volume', w:'14%'}, 
+                        {n:'量比', k:'RVOL', w:'12%'}, {n:'浮動股', k:'FloatStr', w:'12%'}
                     ]);
                     
                     renderTable('vol-list', d.high_vol, [
