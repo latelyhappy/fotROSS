@@ -1,15 +1,15 @@
-import time, threading, requests, os
+import time, threading, requests, os, random
 from datetime import datetime
 import pytz
 import yfinance as yf
 import pandas as pd
 from playwright.sync_api import sync_playwright
-from io import StringIO # ✅ 解決 read_html 的 FutureWarning 警告
+from io import StringIO 
 
 import config
 from news_engine import fetch_news_bg
 
-# ✅ 已經徹底移除手動輸入的檔案監聽機制
+# 系統全自動化，純依靠雷達名單
 auto_hot_symbols = [] 
 
 # ==========================================
@@ -74,7 +74,6 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # ✅ 確保 Webull Ross 篩選策略保持不變且運作正常
                 js_code = f"""
                 async () => {{
                     const payload = {{
@@ -116,7 +115,6 @@ def fetch_webull_gainers():
                 url = "https://stockanalysis.com/markets/premarket/" if rank_type == "2" else "https://stockanalysis.com/markets/gainers/"
                 res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
                 
-                # ✅ 解決 FutureWarning：用 StringIO 包裝 HTML 文字
                 df_list = pd.read_html(StringIO(res.text))
                 if df_list:
                     symbols = df_list[0]['Symbol'].dropna().tolist()
@@ -127,7 +125,10 @@ def fetch_webull_gainers():
             except Exception as ex:
                 pass
                 
-        time.sleep(30)
+        # ⏱️ 隨機延遲保護 (8秒 ± 4秒 = 4 ~ 12 秒)
+        delay = random.randint(4, 12)
+        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ 雷達休眠 {delay} 秒防偵測...")
+        time.sleep(delay)
 
 # ==========================================
 # ★ 核心模組 2：Yahoo 高頻狙擊鏡
@@ -135,7 +136,7 @@ def fetch_webull_gainers():
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V7.0 全自動版 (千筆大容量 + 取消手動 + 修正 StringIO)...")
+    print("🔥 啟動全自動防護版 (動態隨機延遲 + 手動拔除)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -145,7 +146,7 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # ✅ 取消手動輸入邏輯，純依靠雷達自動名單
+            # 純自動化陣列
             symbols_to_track = list(set(auto_hot_symbols))
             
             if not symbols_to_track:
@@ -157,7 +158,6 @@ def scanner_engine():
                 
             wait_count = 0
             
-            # ✅ 解決 curl Timeout 錯誤：加上 timeout=5 保護機制，防止報價卡死
             data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=5)
             
             extracted_stocks = []
@@ -304,18 +304,13 @@ def scanner_engine():
 
             count += 1
             
-            # ==========================================
-            # 🎯 ✅ 修正 5：表格容量全面提升至 1000 筆，舊資料往下擠！
-            # ==========================================
+            # 千筆大容量與下捲更新
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
-            
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
             net_vol_sorted = sorted(t_all, key=lambda x: x['NetVolNum'], reverse=True)
             grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
-            # 使用 `[:1000]` 將最高承載量推升至千筆，
-            # 對於動態產生的訊號 (c_hod 與 c_surge)，直接將新訊號接在原先陣列的前面，完美實現「舊資料往下擠」！
             config.MASTER_BRAIN.update({
                 "gappers": t_all[:1000], 
                 "hod": (c_hod + config.MASTER_BRAIN["hod"])[:1000],
@@ -332,7 +327,9 @@ def scanner_engine():
             if len(t_all) > 0:
                 print(f"[{current_time_tw}] ⏱️ 狙擊完成: 追蹤 {len(t_all)} 檔目標，耗時 {cost_time:.2f} 秒")
             
-            time.sleep(2.0)
+            # ⏱️ 隨機延遲保護 (8秒 ± 4秒 = 4 ~ 12 秒)
+            delay = random.randint(4, 12)
+            time.sleep(delay)
             
         except Exception as e:
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 發生例外錯誤：{e}")
