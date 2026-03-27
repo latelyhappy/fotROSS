@@ -12,12 +12,12 @@ from news_engine import fetch_news_bg
 # ==========================================
 # 🎯 全域下捲式日誌陣列 (Feed 模式，最高 1000 筆)
 # ==========================================
-auto_hot_symbols = []       # 傳遞給 Yahoo 算 K 線的代碼名單
-discovered_symbols = set()  # 紀錄已經發現過的股票，避免重複推播
+auto_hot_symbols = []       
+discovered_symbols = set()  
 
-feed_gappers = []           # 1. 盤前跳空榜 (微牛第一手資料)
-feed_hod = []               # 2. 破高日誌
-feed_surge = []             # 4. 紫燈狙擊日誌
+feed_gappers = []           
+feed_hod = []               
+feed_surge = []             
 
 CATALYST_KEYWORDS = [
     'FDA', 'MERGER', 'ACQUISITION', 'BUYOUT', 'EARNINGS', 'PATENT', 
@@ -58,7 +58,7 @@ def format_vol_km(v_float):
     else: return f"{int(v_float)}"
 
 # ==========================================
-# ★ 核心模組 1：Webull 主引擎 (負責攔截真實數據)
+# ★ 核心模組 1：Webull 主引擎 (萬能掃描與攔截)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers, discovered_symbols
@@ -109,10 +109,10 @@ def fetch_webull_gainers():
                             auto_hot_symbols.insert(0, sym)
                             new_found.append(sym)
                             
-                            # 💎 直接萃取微牛的真實數據！
-                            price = item.get('price', '0')
-                            changeRatio = item.get('changeRatio', '0')
-                            vol = item.get('volume', '0')
+                            # ✨ 萬能欄位掃描：防止 Webull 改名
+                            price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
+                            changeRatio = item.get('changeRatio') or item.get('pChangeRatio') or '0'
+                            vol = item.get('volume') or item.get('pVolume') or '0'
                             
                             try: chg_float = float(changeRatio) * 100
                             except: chg_float = 0.0
@@ -121,20 +121,18 @@ def fetch_webull_gainers():
                             new_entry = {
                                 "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
                                 "Code": sym,
-                                "Price": f"${float(price):.2f}" if price != '0' else "獲取中",
+                                "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
                                 "Change": chg_str,
-                                "Volume": format_vol_km(float(vol)) if vol != '0' else "0K",
+                                "Volume": format_vol_km(float(vol)) if float(vol) > 0 else "0K",
                                 "RVOL": "🔥Webull", 
                                 "discovery_time": time.time()
                             }
-                            # ✅ 下捲式更新：新股票插在最上面 (Index 0)，舊的往下擠！
                             feed_gappers.insert(0, new_entry)
                 
                 if new_found:
-                    # 維持最高 1000 筆容量
                     feed_gappers = feed_gappers[:1000]
-                    auto_hot_symbols = auto_hot_symbols[:200] # Yahoo 只需追蹤最近的 200 檔以保證效能
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 雷達鎖定新目標: {new_found}")
+                    auto_hot_symbols = auto_hot_symbols[:200] 
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 發現新目標: {new_found}")
                 elif not data.get('data', []):
                     raise ValueError("Webull 篩選回傳空值")
                     
@@ -173,22 +171,22 @@ def fetch_webull_gainers():
                     if new_found:
                         feed_gappers = feed_gappers[:1000]
                         auto_hot_symbols = auto_hot_symbols[:200]
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達鎖定新目標: {new_found}")
+                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達發現新目標: {new_found}")
             except Exception as ex:
                 pass
                 
-        # ⏱️ 隨機延遲 (4 ~ 12 秒)
         delay = random.randint(4, 12)
+        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ 雷達休眠 {delay} 秒...")
         time.sleep(delay)
 
 # ==========================================
-# ★ 核心模組 2：Yahoo 副引擎 (專門精算微觀 K 線與紫燈)
+# ★ 核心模組 2：Yahoo 副引擎 (精算與回補)
 # ==========================================
 def scanner_engine():
-    global feed_hod, feed_surge
+    global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8 雙引擎 (Webull 主導資料 + 完美下捲日誌)...")
+    print("🔥 啟動 V8.0 真下捲與精準回補版...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -198,7 +196,6 @@ def scanner_engine():
             loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             
-            # 只精算最近活躍的 200 檔股票，防止 Yahoo 當機
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
@@ -214,11 +211,10 @@ def scanner_engine():
             
             extracted_stocks = []
             if not data_df.empty:
-                is_multi = isinstance(data_df.columns, pd.MultiIndex)
                 for sym in symbols_to_track:
                     try:
                         price, vol = 0.0, 0.0
-                        if is_multi:
+                        if isinstance(data_df.columns, pd.MultiIndex):
                             if 'Close' in data_df.columns.get_level_values(0) and sym in data_df['Close'].columns:
                                 price = float(data_df['Close'][sym].dropna().iloc[-1])
                                 vol = float(data_df['Volume'][sym].dropna().iloc[-1])
@@ -245,6 +241,15 @@ def scanner_engine():
                 rvol = data['rvol_tw']
                 
                 f, a, prev_close = get_static(sym)
+                
+                # ✨ 雙重核對回補：如果 Webull 沒抓到價格，讓 Yahoo 補回去！
+                for gap_entry in feed_gappers:
+                    if gap_entry['Code'] == sym and gap_entry['Price'] == "獲取中":
+                        gap_entry['Price'] = f"${p_num:.2f}"
+                        gap_entry['Volume'] = format_vol_km(vol_raw)
+                        if gap_entry['Change'] == "0.00%":
+                            chg = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
+                            gap_entry['Change'] = f"+{chg:.2f}%" if chg > 0 else f"{chg:.2f}%"
                 
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
@@ -317,7 +322,7 @@ def scanner_engine():
                 
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                    "Change": "Yahoo精算中", "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
+                    "Change": "Yahoo", "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
                     "RVOL": f"{rvol:.1f}x", "FloatStr": float_str, "Streak": streak_text,
                     "NetVolNum": net_vol, 
                     "NewsScore": cell["max_news_score"],
@@ -329,11 +334,8 @@ def scanner_engine():
 
                 t_all.append(item)
                 
-                # ✅ 下捲式更新：破高與紫燈訊號，安插在最前面 (Index 0)，舊資料往下擠！
-                if is_hod_break: 
-                    feed_hod.insert(0, item)
-                if sniper_triggered or (cell["streak"] >= 2 and is_hod_break): 
-                    feed_surge.insert(0, item)
+                if is_hod_break: feed_hod.insert(0, item)
+                if sniper_triggered or (cell["streak"] >= 2 and is_hod_break): feed_surge.insert(0, item)
 
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
@@ -345,22 +347,19 @@ def scanner_engine():
 
             count += 1
             
-            # 維持訊號日誌容量最高 1000 筆
             feed_hod = feed_hod[:1000]
             feed_surge = feed_surge[:1000]
             
-            # 數值排行版 (淨量、新聞等)
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
             net_vol_sorted = sorted(t_all, key=lambda x: x['NetVolNum'], reverse=True)
             grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
-            # ✅ 將微牛原生資料與 Yahoo 日誌傳送給前端！
             config.MASTER_BRAIN.update({
-                "gappers": feed_gappers[:1000],          # 1. 盤前跳空 (微牛原生真實數據，下捲式)
-                "hod": feed_hod,                         # 2. 破高日誌 (下捲式)
-                "surge": feed_surge,                       # 4. 紫燈日誌 (下捲式)
+                "gappers": feed_gappers,                 # 保留最完美的微牛日誌
+                "hod": feed_hod,                         
+                "surge": feed_surge,                       
                 "high_vol": high_vol_sorted[:1000],       
                 "net_vol_leaders": net_vol_sorted[:1000], 
                 "grinders": grind_sorted[:1000],          
