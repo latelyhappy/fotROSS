@@ -74,7 +74,6 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # ✅ 修正：移除容易報錯的百分比篩選，依靠 sort_id 降冪排序，完美取得前 30 名最大漲幅股票
                 js_code = f"""
                 async () => {{
                     const payload = {{
@@ -103,7 +102,6 @@ def fetch_webull_gainers():
                     if sym and '-' not in sym: symbols.append(sym)
                 
                 if symbols:
-                    # ✅ 修正：使用下捲式邏輯，將新找到的股票「安插在最前面」，並累積達 1000 筆！
                     for s in reversed(symbols):
                         if s not in auto_hot_symbols:
                             auto_hot_symbols.insert(0, s)
@@ -116,7 +114,15 @@ def fetch_webull_gainers():
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗 ({e})，立刻切換【無敵備用雷達】...")
             try:
                 rank_type, _ = get_market_rank_type()
-                url = "https://stockanalysis.com/markets/premarket/" if rank_type == "2" else "https://stockanalysis.com/markets/gainers/"
+                
+                # ✅ 修正：根據盤前、盤中、盤後精準切換備用雷達網址！
+                if rank_type == "2":
+                    url = "https://stockanalysis.com/markets/premarket/"
+                elif rank_type == "1":
+                    url = "https://stockanalysis.com/markets/after-hours/"
+                else:
+                    url = "https://stockanalysis.com/markets/gainers/"
+                    
                 res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
                 
                 df_list = pd.read_html(StringIO(res.text))
@@ -143,7 +149,7 @@ def fetch_webull_gainers():
 def scanner_engine():
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V7.2 完美下捲修正版 (解決篩選空值 + 累積千筆歷史)...")
+    print("🔥 啟動 V7.3 萬能解析版 (無敵 K 線防呆 + 盤後支援)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -164,29 +170,35 @@ def scanner_engine():
                 
             wait_count = 0
             
-            # 使用 group_by='ticker' 確保 yfinance 在有壞掉的代碼時，依舊能保持結構穩定
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
+            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10)
             
             extracted_stocks = []
             if not data_df.empty:
+                # ✅ V7.3 萬能解析器：不管 yfinance 怎麼變形，穩穩抽出價格！
                 for sym in symbols_to_track:
                     try:
-                        if len(symbols_to_track) == 1:
-                            latest_row = data_df.iloc[-1]
+                        price, vol = 0.0, 0.0
+                        
+                        if isinstance(data_df.columns, pd.MultiIndex):
+                            # 新版 yfinance 格式 (Price 在上層, Ticker 在下層)
+                            if 'Close' in data_df.columns.get_level_values(0) and sym in data_df['Close'].columns:
+                                price = float(data_df['Close'][sym].dropna().iloc[-1])
+                                vol = float(data_df['Volume'][sym].dropna().iloc[-1])
+                            # 舊版 yfinance 格式 (Ticker 在上層)
+                            elif sym in data_df.columns.get_level_values(0):
+                                price = float(data_df[sym]['Close'].dropna().iloc[-1])
+                                vol = float(data_df[sym]['Volume'].dropna().iloc[-1])
                         else:
-                            # 如果該股票被 Yahoo 剔除，就跳過它，保護其他正常的股票
-                            if sym not in data_df.columns.get_level_values(0):
-                                continue
-                            latest_row = data_df[sym].iloc[-1]
+                            # 單獨一檔股票成功時，會變成單層結構
+                            price = float(data_df['Close'].dropna().iloc[-1])
+                            vol = float(data_df['Volume'].dropna().iloc[-1])
                             
-                        price = float(latest_row['Close'])
-                        vol = float(latest_row['Volume'])
                         if pd.notna(price) and price > 0:
                             extracted_stocks.append({
                                 'sym': sym, 'price': price, 'vol_raw': vol, 'rvol_tw': vol / 50000.0
                             })
                     except:
-                        continue
+                        continue # 只有這支壞掉的會被跳過，其他好的股票安全過關！
 
             t_all, c_hod, c_surge = [], [], []
             current_t = time.time()
@@ -215,7 +227,7 @@ def scanner_engine():
                     "surge_start_price": initial_hod, "max_surge_vol": 0, 
                     "pullback_start_time": 0, "pullback_min_vol": 9999999,
                     "surge_wave_count": 0, "pullback_low": p_num, "sniper_label": "",
-                    "discovery_time": current_t  # ✅ 紀錄發現時間，用來實現下捲式排序
+                    "discovery_time": current_t  # 紀錄發現時間，用來實現下捲式排序
                 })
                 
                 is_hod_break = False
@@ -320,7 +332,7 @@ def scanner_engine():
             
             news_valid = [x for x in t_all if x['NewsScore'] > 0 and x['HasCatalyst']]
             
-            # ✅ 修正：嚴格依據「發現時間」排序，最新的永遠在最上方，完美實現下捲式更新！
+            # 嚴格依據「發現時間」排序，最新的永遠在最上方，完美實現下捲式更新！
             gappers_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["discovery_time"], reverse=True)
             
             high_vol_sorted = sorted(t_all, key=lambda x: x['vol_raw'], reverse=True)
@@ -328,7 +340,6 @@ def scanner_engine():
             grind_sorted = sorted(t_all, key=lambda x: config.MASTER_BRAIN["details"][x["Code"]]["streak"], reverse=True)
             news_sorted = sorted(news_valid, key=lambda x: x['NewsScore'], reverse=True)
             
-            # 全部擴展至 1000 筆容量
             config.MASTER_BRAIN.update({
                 "gappers": gappers_sorted[:1000], 
                 "hod": (c_hod + config.MASTER_BRAIN["hod"])[:1000],
