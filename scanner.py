@@ -9,12 +9,7 @@ from io import StringIO
 import config
 from news_engine import fetch_news_bg
 
-# ==========================================
-# 🎯 全域下捲式日誌陣列 (Feed 模式，最高 1000 筆)
-# ==========================================
 auto_hot_symbols = []       
-discovered_symbols = set()  
-
 feed_gappers = []           
 feed_hod = []               
 feed_surge = []             
@@ -30,7 +25,6 @@ def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
     now_ny = datetime.now(tz_ny)
     current_time = now_ny.time()
-    # 美股深夜時段 (20:00 ~ 04:00) 其實沒有交易，但我們歸類為盤前或盤後方便雷達抓歷史資料
     if current_time < datetime.strptime("09:30", "%H:%M").time(): return "2", "盤前"
     elif current_time > datetime.strptime("16:00", "%H:%M").time(): return "1", "盤後"
     else: return "0", "盤中"
@@ -55,15 +49,32 @@ def get_static(ticker):
         return (1000000, 500000, 1.0)
 
 def format_vol_km(v_float):
-    if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
-    elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
-    else: return f"{int(v_float)}"
+    try:
+        v_float = float(v_float)
+        if v_float >= 1_000_000: return f"{v_float/1_000_000:.1f}M"
+        elif v_float >= 1_000: return f"{v_float/1_000:.1f}K"
+        else: return f"{int(v_float)}"
+    except:
+        return "0K"
+
+def update_or_add_gapper(new_entry):
+    global feed_gappers
+    # ✨ 核心修復：尋找表格中是否已有此股票，若有則更新數據並移到最上方（下捲）
+    for i, entry in enumerate(feed_gappers):
+        if entry['Code'] == new_entry['Code']:
+            # 如果數據真的有變動，才推到最上方
+            if entry['Price'] != new_entry['Price'] or entry['Volume'] != new_entry['Volume']:
+                feed_gappers.pop(i)
+                feed_gappers.insert(0, new_entry)
+            return
+    # 如果是全新的股票，直接加在最上方
+    feed_gappers.insert(0, new_entry)
 
 # ==========================================
 # ★ 核心模組 1：Webull 主引擎 & 萬能備用雷達
 # ==========================================
 def fetch_webull_gainers():
-    global auto_hot_symbols, feed_gappers, discovered_symbols
+    global auto_hot_symbols, feed_gappers
     tz_tw = pytz.timezone('Asia/Taipei')
     
     while True:
@@ -106,43 +117,43 @@ def fetch_webull_gainers():
                 for item in data.get('data', []):
                     sym = item.get('ticker', {}).get('symbol')
                     if sym and '-' not in sym:
-                        if sym not in discovered_symbols:
-                            discovered_symbols.add(sym)
-                            auto_hot_symbols.insert(0, sym)
-                            new_found.append(sym)
-                            
-                            f, avg_vol, prev_close = get_static(sym)
-                            
-                            price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
-                            changeRatio = item.get('changeRatio') or item.get('pChangeRatio') or '0'
-                            vol = item.get('volume') or item.get('pVolume') or '0'
-                            
-                            try: vol_float = float(vol)
-                            except: vol_float = 0.0
-                            
-                            try: chg_float = float(changeRatio) * 100
-                            except: chg_float = 0.0
-                            chg_str = f"+{chg_float:.2f}%" if chg_float > 0 else f"{chg_float:.2f}%"
-                            
-                            rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
-                            
-                            new_entry = {
-                                "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
-                                "Code": sym,
-                                "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
-                                "Change": chg_str,
-                                "Volume": format_vol_km(vol_float) if vol_float > 0 else "0K",
-                                "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "計算中", 
-                                "discovery_time": time.time()
-                            }
-                            feed_gappers.insert(0, new_entry)
+                        if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
+                        new_found.append(sym)
+                        
+                        f, avg_vol, prev_close = get_static(sym)
+                        float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                        
+                        price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
+                        changeRatio = item.get('changeRatio') or item.get('pChangeRatio') or '0'
+                        vol = item.get('volume') or item.get('pVolume') or '0'
+                        
+                        try: vol_float = float(vol)
+                        except: vol_float = 0.0
+                        
+                        try: chg_float = float(changeRatio) * 100
+                        except: chg_float = 0.0
+                        chg_str = f"+{chg_float:.2f}%" if chg_float > 0 else f"{chg_float:.2f}%"
+                        
+                        rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
+                        
+                        new_entry = {
+                            "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
+                            "Code": sym,
+                            "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
+                            "Change": chg_str,
+                            "Volume": format_vol_km(vol_float),
+                            "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "計算中",
+                            "FloatStr": float_str,
+                            "discovery_time": time.time()
+                        }
+                        update_or_add_gapper(new_entry)
                 
                 if new_found:
                     feed_gappers = feed_gappers[:1000]
                     auto_hot_symbols = auto_hot_symbols[:200] 
-                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 發現新目標: {new_found}")
+                    print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ✅ Webull 擷取完畢")
                 elif not data.get('data', []):
-                    raise ValueError("Webull 篩選回傳空值 (可能是深夜無交易量)")
+                    raise ValueError("Webull 篩選回傳空值")
                     
         except Exception as e:
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗 ({e})，啟動備用雷達...")
@@ -157,7 +168,6 @@ def fetch_webull_gainers():
                 
                 if df_list:
                     df = df_list[0]
-                    # ✨ V8.2 萬能欄位掃描器：不管網站怎麼改欄位名字，強制挖出數據！
                     price_col = next((c for c in df.columns if 'price' in c.lower() or 'last' in c.lower()), None)
                     change_col = next((c for c in df.columns if '%' in c or 'change' in c.lower()), None)
                     vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
@@ -166,31 +176,35 @@ def fetch_webull_gainers():
                     for idx, row in df.iterrows():
                         if idx > 29: break
                         sym = str(row.get('Symbol', ''))
-                        if sym and '-' not in sym and sym not in discovered_symbols:
-                            discovered_symbols.add(sym)
-                            auto_hot_symbols.insert(0, sym)
+                        if sym and '-' not in sym:
+                            if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
                             new_found.append(sym)
                             
-                            # 萃取髒資料並清理
+                            f, avg_vol, prev_close = get_static(sym)
+                            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                            
                             p_val = str(row[price_col]) if price_col and pd.notna(row[price_col]) else '0'
                             c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
-                            v_val = str(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else '0'
+                            
+                            # 處理交易量字串（將逗號清除）
+                            v_val_str = str(row[vol_col]).replace(',', '') if vol_col and pd.notna(row[vol_col]) else '0'
                             
                             new_entry = {
                                 "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
                                 "Code": sym,
                                 "Price": f"${p_val}" if not p_val.startswith('$') else p_val,
                                 "Change": c_val if '%' in c_val else f"{c_val}%",
-                                "Volume": v_val,
-                                "RVOL": "雷達鎖定...",
+                                "Volume": format_vol_km(v_val_str),
+                                "RVOL": "補齊中...",
+                                "FloatStr": float_str,
                                 "discovery_time": time.time()
                             }
-                            feed_gappers.insert(0, new_entry)
+                            update_or_add_gapper(new_entry)
                             
                     if new_found:
                         feed_gappers = feed_gappers[:1000]
                         auto_hot_symbols = auto_hot_symbols[:200]
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達發現新目標: {new_found}")
+                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🛡️ 備用雷達擷取完畢")
             except Exception as ex:
                 pass
                 
@@ -205,7 +219,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V8.2 夜間無敵裝甲版...")
+    print("🔥 啟動 V8.5 動態更新與精準欄位版...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -260,8 +274,9 @@ def scanner_engine():
                 rvol = data['rvol_tw']
                 
                 f, a, prev_close = get_static(sym)
+                float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                 
-                # ✨ 雙重核對回補：如果深夜 Yahoo 有抓到零星報價，強制幫備用雷達補齊
+                # ✨ 雙重核對回補：只要漏掉，Yahoo 立刻精準補上
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
                         if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']:
@@ -273,6 +288,8 @@ def scanner_engine():
                         if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0":
                             chg = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
                             gap_entry['Change'] = f"+{chg:.2f}%" if chg > 0 else f"{chg:.2f}%"
+                        if "FloatStr" not in gap_entry:
+                            gap_entry['FloatStr'] = float_str
                 
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
@@ -287,7 +304,6 @@ def scanner_engine():
                 is_hod_break = False
                 if p_num > cell["HOD"]: cell["HOD"] = p_num; cell["streak"] += 1; is_hod_break = True
                 
-                float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                 last_price = cell.get("last_price", p_num)
                 curr_vol_delta = vol_raw
                 
