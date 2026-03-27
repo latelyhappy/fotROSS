@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V215.9 - 終極實戰版</title>
+    <title>ROSS Sniper V7.1 - 終極全自動版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -52,8 +52,7 @@
         <button onclick="resetZoom()">🔄 重置</button>
         <button id="lock-btn" onclick="toggleGlobalLock()">🔓 視窗解鎖</button>
         <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止掃描</button>
-        
-    </div>
+        </div>
     
     <div class="window" id="win-gap" style="top:10px; left:10px; width:400px; height:280px;"><div class="title-bar bg-blue">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-vol" style="top:300px; left:10px; width:400px; height:280px;"><div class="title-bar bg-gold">3. 異常爆量上漲</div><div class="content" id="vol-list"></div><div class="resize-handle"></div></div>
@@ -77,63 +76,6 @@
         let lastKnownHodData = [];
         let brainDetailsCache = {};
         let activeSymbol = "";
-
-        // =====================================
-        // 💡 融合區：1000筆對話框歷史紀錄 (LocalStorage) 
-        // =====================================
-        let sniperHistory = JSON.parse(localStorage.getItem('rossSniperHistory') || '[]');
-
-        function updateSniperDropdown() {
-            const dl = document.getElementById('sniperHistoryList');
-            if (!dl) return;
-            dl.innerHTML = '';
-            sniperHistory.forEach(sym => {
-                const opt = document.createElement('option');
-                opt.value = sym;
-                dl.appendChild(opt);
-            });
-        }
-        updateSniperDropdown();
-
-        function addTarget() {
-            let tickerInput = document.getElementById('sniperInput');
-            let ticker = tickerInput.value.trim().toUpperCase();
-            if (!ticker) return;
-            
-            if (!sniperHistory.includes(ticker)) {
-                sniperHistory.unshift(ticker);
-                if (sniperHistory.length > 1000) sniperHistory.pop();
-                localStorage.setItem('rossSniperHistory', JSON.stringify(sniperHistory));
-                updateSniperDropdown();
-            }
-
-            let btn = document.getElementById('sniperBtn');
-            let oldText = btn.innerText;
-            btn.innerText = "⏳...";
-            
-            fetch('/add_target', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'ticker=' + ticker
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.status === 'success') {
-                    btn.innerText = "✅ " + data.ticker;
-                    btn.style.background = "#fff";
-                    setTimeout(() => { btn.innerText = oldText; btn.style.background = "#00ff00"; }, 2000);
-                    tickerInput.value = '';
-                } else {
-                    btn.innerText = "❌";
-                    btn.style.background = "#ff3333";
-                    setTimeout(() => { btn.innerText = oldText; btn.style.background = "#00ff00"; }, 2000);
-                }
-            }).catch(err => { console.error("鎖定失敗:", err); btn.innerText = oldText; });
-        }
-
-        document.getElementById("sniperInput").addEventListener("keypress", function(event) {
-            if (event.key === "Enter") { event.preventDefault(); addTarget(); }
-        });
 
         // =====================================
         // 視窗拖曳與控制邏輯 (完全保留)
@@ -232,7 +174,7 @@
             });
         });
 
-        // 💡 融合區：防止雙擊事件干擾單擊
+        // 💡 雙擊開啟 TradingView 功能 (保留)
         function openTW(sym, event) {
             if(event) event.stopPropagation();
             window.open(`https://www.tradingview.com/chart/?symbol=${sym}`, '_blank');
@@ -258,7 +200,6 @@
                 html += `<tr ${styleStr} onclick="loadDetail('${row.Code}')">`;
                 cols.forEach(c => {
                     let val = row[c.k] || '';
-                    // 💡 融合區：加入雙擊開啟 TradingView 功能
                     if (c.k === 'Code') {
                         val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊立刻開啟 TradingView">${val}</span>`;
                     }
@@ -372,11 +313,10 @@
                 });
             } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
             
-            // 💡 融合區：右下角的巨大代碼也保留雙擊開啟 TW 的功能
-            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
+            document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        // ★ 效能優化：前端降速至每 5 秒刷新一次 (5000 毫秒)
+        // ★ 每 5 秒自動向伺服器拉取資料
         setInterval(refresh, 5000);
 
         // 每 1 秒檢查一次資料是否延遲的「心跳監測器」
@@ -388,6 +328,9 @@
                 statusEl.style.color = '#fff';
             }
         }, 1000);
+        
+        // 第一次載入先立刻執行一次
+        refresh();
     </script>
 </body>
 </html>
