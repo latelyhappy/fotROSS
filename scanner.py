@@ -12,15 +12,19 @@ import config
 
 # 🌟 全域背景執行緒池
 bg_task_pool = ThreadPoolExecutor(max_workers=10)
-
-# 🌟 Yahoo 資料庫紅綠燈
 yf_lock = threading.Lock()
 
-# 🛡️ Cloudscraper 破甲防護模組 & 自訂 User-Agent
+# 🎯 強制立刻印出日誌，絕對不讓 Railway 吃字
+def log_debug(ticker, msg):
+    tz_tw = pytz.timezone('Asia/Taipei')
+    time_str = datetime.now(tz_tw).strftime('%H:%M:%S')
+    # flush=True 是關鍵！強迫雲端伺服器瞬間吐出文字
+    print(f"[{time_str}] 🕵️‍♂️ [DEBUG {ticker}] {msg}", flush=True)
+
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
-    print("🛡️ 已啟動 Cloudscraper 破甲模式！")
+    print("🛡️ 已啟動 Cloudscraper 破甲模式！", flush=True)
 except ImportError:
     scraper = requests.Session()
     scraper.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"})
@@ -38,7 +42,7 @@ CATALYST_KEYWORDS = [
 ]
 
 # ==========================================
-# 🔍 終極遞迴 JSON 拆解器 (含字串穿透解析)
+# 🔍 終極遞迴 JSON 拆解器
 # ==========================================
 def find_news_in_json(obj, results=None):
     if results is None:
@@ -58,7 +62,6 @@ def find_news_in_json(obj, results=None):
         for item in obj:
             find_news_in_json(item, results)
     elif isinstance(obj, str):
-        # 破解微牛可能將 JSON 轉為字串隱藏的招數
         if obj.startswith('{') or obj.startswith('['):
             try:
                 parsed = json.loads(obj)
@@ -67,11 +70,11 @@ def find_news_in_json(obj, results=None):
     return results
 
 # ==========================================
-# 📰 微牛 (Webull) 新聞偵錯引擎 (Debug Mode)
+# 📰 微牛 (Webull) 新聞偵錯引擎 (強制吐字版)
 # ==========================================
 def fetch_webull_news_bg(ticker, cell):
     try:
-        print(f"🕵️‍♂️ [DEBUG {ticker}] 準備擷取新聞...")
+        log_debug(ticker, "啟動連線程序... 隨機等待中")
         time.sleep(random.uniform(0.5, 2.0))
         
         tz_ny = pytz.timezone('America/New_York')
@@ -83,41 +86,39 @@ def fetch_webull_news_bg(ticker, cell):
         data = res.json()
         ticker_list = data.get("data", [])
         if not ticker_list:
-            print(f"❌ [DEBUG {ticker}] 查無微牛代碼")
+            log_debug(ticker, "❌ API 查無微牛代碼")
             raise ValueError("查無微牛代碼")
             
         t_info = ticker_list[0]
         ticker_id = t_info.get("tickerId")
         exchange = str(t_info.get("disExchangeCode", "nasdaq")).lower()
-        
-        print(f"✅ [DEBUG {ticker}] 取得微牛 ID: {ticker_id}, 交易所: {exchange}")
+        log_debug(ticker, f"✅ 取得微牛 ID: {ticker_id}, 交易所: {exchange}")
         
         web_url = f"https://www.webull.com/quote/{exchange}-{ticker.lower()}/news"
+        log_debug(ticker, f"📡 準備抓取網頁版: {web_url}")
         html_res = scraper.get(web_url, timeout=15)
         html_text = html_res.text
-        
-        print(f"✅ [DEBUG {ticker}] 抓取網頁原始碼，長度: {len(html_text)}，狀態碼: {html_res.status_code}")
+        log_debug(ticker, f"✅ 抓取網頁完成，長度: {len(html_text)}，狀態碼: {html_res.status_code}")
         
         raw_news = []
-        
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text, re.DOTALL)
         if match:
-            print(f"✅ [DEBUG {ticker}] 成功找到網頁資料庫區塊 (__NEXT_DATA__)")
+            log_debug(ticker, "✅ 成功找到 __NEXT_DATA__ 區塊，開始解碼...")
             try:
                 json_data = json.loads(match.group(1))
                 raw_news = find_news_in_json(json_data)
-                print(f"✅ [DEBUG {ticker}] 暴力拆解成功，找到 {len(raw_news)} 筆原始新聞")
+                log_debug(ticker, f"✅ 暴力拆解成功，共找到 {len(raw_news)} 筆原始新聞")
             except Exception as e:
-                print(f"❌ [DEBUG {ticker}] 網頁 JSON 解析失敗: {e}")
+                log_debug(ticker, f"❌ 網頁 JSON 解析失敗: {e}")
         else:
-            print(f"❌ [DEBUG {ticker}] 找不到網頁資料庫區塊，可能被微牛改版擋住了")
+            log_debug(ticker, "❌ 找不到 __NEXT_DATA__，微牛可能改版或隱藏了資料")
             
         if not raw_news:
-            print(f"⚠️ [DEBUG {ticker}] 網頁失敗，啟動備案 API 通道...")
+            log_debug(ticker, "⚠️ 啟動備案 API 通道...")
             api_url = f"https://quotes-gw.webullfintech.com/api/information/news/v8/tickerNews?tickerId={ticker_id}&currentNewsId=0&pageSize=10"
             api_res = scraper.get(api_url, timeout=10).json()
             api_news = api_res.get("news", [])
-            print(f"⚠️ [DEBUG {ticker}] 備案 API 回傳了 {len(api_news)} 筆新聞")
+            log_debug(ticker, f"⚠️ 備案 API 回傳了 {len(api_news)} 筆新聞")
             for n in api_news:
                 raw_news.append({
                     "title": n.get("title", ""),
@@ -142,18 +143,16 @@ def fetch_webull_news_bg(ticker, cell):
                 pub_dt = datetime.strptime(pub_date_only, "%Y-%m-%d")
                 days_diff = (now_ny.date() - pub_dt.date()).days
             except Exception as e:
-                print(f"❌ [DEBUG {ticker}] 日期解析錯誤: {pub_time_str}")
                 days_diff = 0
                 pub_date_only = ""
                 
-            print(f"🔍 [DEBUG {ticker}] 驗證中: {pub_date_only} (距今 {days_diff} 天) - {title[:20]}...")
+            log_debug(ticker, f"🔍 驗證日期: {pub_date_only} (距今 {days_diff} 天) | 標題: {title[:15]}...")
             
             if days_diff > 4: 
-                print(f"   -> 🛑 放棄：超過 4 天")
+                log_debug(ticker, f"   -> 🛑 放棄：超過 4 天")
                 continue
                 
             is_today = (pub_date_only == today_str)
-                
             clean_time_str = pub_time_str.replace('T', ' ')
             time_display = clean_time_str[11:16] if len(clean_time_str) >= 16 else ""
             date_display = clean_time_str[5:10] if len(clean_time_str) >= 10 else ""
@@ -173,14 +172,14 @@ def fetch_webull_news_bg(ticker, cell):
             
         if valid_news:
             cell["NewsList"] = valid_news
-            print(f"✅ [DEBUG {ticker}] 最終成功寫入 {len(valid_news)} 筆新聞！")
+            log_debug(ticker, f"🎉 最終成功寫入 {len(valid_news)} 筆新聞！")
         else:
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
-            print(f"⚠️ [DEBUG {ticker}] 最終結果：近 4 天無有效新聞")
+            log_debug(ticker, "⚠️ 最終結果：近 4 天無有效新聞，已寫入 TradingView 連結")
             
     except Exception as e:
-        print(f"❌ [DEBUG {ticker}] 致命錯誤閃退: {e}")
+        log_debug(ticker, f"❌ 致命錯誤閃退: {e}")
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
         cell["NewsList"] = [{"id": "0", "title": f"🗞️ 微牛爬蟲失敗，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
 
@@ -253,7 +252,7 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...", flush=True)
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -336,7 +335,7 @@ def fetch_webull_gainers():
                     
         except Exception as e:
             if "深夜靜音模式切換" not in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗，切換備用雷達...")
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗，切換備用雷達...", flush=True)
                 
             try:
                 rank_type, _ = get_market_rank_type()
@@ -405,7 +404,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.2 (微牛探測雷達版)...")
+    print("🔥 啟動 V12.3 (日誌強制穿透與偵錯版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -424,7 +423,7 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...")
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...", flush=True)
                 wait_count += 1
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
@@ -632,9 +631,12 @@ def scanner_engine():
                         item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
-                if not cell["NewsList"]: 
+                # 🚨 強制重試機制：如果是系統產生的假標籤（沒有真新聞），每 30 圈強制重抓一次，讓您看到日誌！
+                has_real_news = any(n.get("title", "") and "點擊前往 TradingView" not in n.get("title", "") for n in cell["NewsList"])
+                
+                if not has_real_news and (count % 30 == 0 or count == 0): 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
-                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在潛入微牛擷取即時新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 重新排隊潛入微牛擷取即時新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
                     bg_task_pool.submit(fetch_webull_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
@@ -671,5 +673,5 @@ def scanner_engine():
             
         except Exception as e:
             if "database is locked" not in str(e) and "NoneType" not in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}", flush=True)
             time.sleep(5)
