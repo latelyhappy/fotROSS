@@ -40,6 +40,9 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
+# ==========================================
+# 🌐 Google 神經網路翻譯引擎
+# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -51,6 +54,9 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
+# ==========================================
+# 📰 終極新聞管線 (捨棄延遲RSS，改用 yfinance 直連 API)
+# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = []
@@ -59,40 +65,33 @@ def fetch_direct_news_bg(ticker, cell):
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
         
-        rss_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
-        res = requests.get(rss_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        xml_text = res.text
+        # 🚨 V14 升級：直接呼叫 Yahoo 前端無快取 API，取代慢速的 RSS
+        tkr = yf.Ticker(ticker)
+        news_items = tkr.news
         
-        titles = re.findall(r'<title>(.*?)</title>', xml_text)
-        links = re.findall(r'<link>(.*?)</link>', xml_text)
-        dates = re.findall(r'<pubDate>(.*?)</pubDate>', xml_text)
-        
-        if titles and "Yahoo! Finance" in titles[0]:
-            titles = titles[1:]
-            links = links[1:]
-            
         new_articles = []
-        for i in range(min(len(titles), len(dates))):
-            raw_title = titles[i].replace("<![CDATA[", "").replace("]]>", "").strip()
-            raw_link = links[i] if i < len(links) else f"https://finance.yahoo.com/quote/{ticker}/news"
-            pub_date_str = dates[i].strip()
+        for item in news_items:
+            raw_title = item.get('title', '').strip()
+            raw_link = item.get('link', f"https://finance.yahoo.com/quote/{ticker}/news")
+            pub_ts = item.get('providerPublishTime')
             
-            if not raw_title: continue
+            if not raw_title or not pub_ts: continue
             if raw_title in cell["raw_news_titles"]: continue
                 
             try:
-                clean_str = pub_date_str[:-6].strip() 
-                pub_dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
+                pub_dt = datetime.fromtimestamp(pub_ts, tz_ny)
                 pub_date_only = pub_dt.strftime("%Y-%m-%d")
                 pub_time_only = pub_dt.strftime("%H:%M")
                 days_diff = (now_ny.date() - pub_dt.date()).days
-            except Exception as e:
+            except Exception:
                 days_diff, pub_date_only, pub_time_only = 0, "", ""
                 
-            if days_diff > 4: break 
+            if days_diff > 4: continue # 保持 4 天紀律
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
+            
+            log_debug(ticker, f"✨ 攔截瞬時公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
             cell["raw_news_titles"].append(raw_title)
             
@@ -105,6 +104,7 @@ def fetch_direct_news_bg(ticker, cell):
         if new_articles:
             clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
             cell["NewsList"] = (new_articles + clean_old_list)[:5]
+            log_debug(ticker, f"🎉 成功新增並翻譯 {len(new_articles)} 筆突發新聞！")
         elif not cell.get("NewsList") or "🗞️" in cell["NewsList"][0].get("title", ""):
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
@@ -172,7 +172,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ 混血先鋒飆股雷達 (瀏覽器常駐效能版)
+# ★ 微牛主帥引擎 (瀏覽器常駐效能版)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -180,7 +180,6 @@ def fetch_webull_gainers():
     
     while True:
         try:
-            # 🚨 效能大解放：開啟一次瀏覽器，供下面迴圈重複使用 100 次！
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
                 context = browser.new_context(user_agent="Mozilla/5.0")
@@ -188,7 +187,6 @@ def fetch_webull_gainers():
                 page.goto("https://app.webull.com/screener", timeout=30000)
                 time.sleep(3) 
                 
-                # 內部迴圈：只靠發送 API 請求，不重複開關瀏覽器
                 for _ in range(100):
                     try:
                         rank_type, market_status = get_market_rank_type()
@@ -303,20 +301,21 @@ def fetch_webull_gainers():
                                     feed_gappers = feed_gappers[:1000]
                                     auto_hot_symbols = auto_hot_symbols[:200]
                         except: pass
-                    time.sleep(random.randint(4, 12))
-                browser.close() # 執行 100 次後關閉，重新開啟以釋放記憶體
+                    # 🚨 V14：主引擎掃描間隔極限壓縮，逼出速度！
+                    time.sleep(random.randint(3, 5))
+                browser.close() 
         except Exception as e:
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 瀏覽器環境重置: {e}", flush=True)
             time.sleep(5)
 
 # ==========================================
-# ★ 主控引擎
+# ★ V14 狙擊手追蹤引擎 (預判突破 + EMA49 磁吸)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V13.3 (極致效能防護版)...", flush=True)
+    print("🔥 啟動 V14 終極預判狙擊版 (EMA49 磁吸+瞬時新聞)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -352,28 +351,44 @@ def scanner_engine():
             surge_vol_threshold = 2000 if rank_type == "2" else 10000
             
             with yf_lock:
-                # 🚨 效能防護罩：嚴格限制 Yahoo 下載只能用 10 個執行緒，防止塞爆伺服器！
                 data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker', threads=10)
             
             extracted_stocks = []
             if not data_df.empty:
                 for sym in symbols_to_track:
                     try:
-                        price, vol = 0.0, 0.0
+                        # 🚨 擷取完整的 1m 收盤價序列，準備計算 EMA49 與判斷動能
                         if isinstance(data_df.columns, pd.MultiIndex):
                             if sym in data_df.columns.get_level_values(0):
-                                price = float(data_df[sym]['Close'].dropna().iloc[-1])
-                                vol = float(data_df[sym]['Volume'].dropna().iloc[-1])
+                                close_series = data_df[sym]['Close'].dropna()
+                                vol_series = data_df[sym]['Volume'].dropna()
                             elif 'Close' in data_df.columns.get_level_values(0) and sym in data_df['Close'].columns:
-                                price = float(data_df['Close'][sym].dropna().iloc[-1])
-                                vol = float(data_df['Volume'][sym].dropna().iloc[-1])
+                                close_series = data_df['Close'][sym].dropna()
+                                vol_series = data_df['Volume'][sym].dropna()
                         else:
                             if len(symbols_to_track) == 1 and 'Close' in data_df.columns:
-                                price = float(data_df['Close'].dropna().iloc[-1])
-                                vol = float(data_df['Volume'].dropna().iloc[-1])
+                                close_series = data_df['Close'].dropna()
+                                vol_series = data_df['Volume'].dropna()
+                        
+                        if not close_series.empty:
+                            p_num = float(close_series.iloc[-1])
+                            vol = float(vol_series.iloc[-1])
+                            
+                            # EMA 49 計算 (需要至少 10 根 K 線才具備參考價值)
+                            ema49_val = 0.0
+                            dist_3_ago = 999.0
+                            if len(close_series) >= 10:
+                                ema49_series = close_series.ewm(span=49, adjust=False).mean()
+                                ema49_val = float(ema49_series.iloc[-1])
                                 
-                        if pd.notna(price) and price > 0:
-                            extracted_stocks.append({'sym': sym, 'price': price, 'vol_raw': vol, 'rvol_tw': vol / 50000.0})
+                                # 取得 3 分鐘前與 EMA49 的距離
+                                if len(close_series) >= 4:
+                                    dist_3_ago = abs(float(close_series.iloc[-4]) - float(ema49_series.iloc[-4]))
+                                
+                            extracted_stocks.append({
+                                'sym': sym, 'price': p_num, 'vol_raw': vol, 'rvol_tw': vol / 50000.0,
+                                'ema49': ema49_val, 'dist_3_ago': dist_3_ago
+                            })
                     except:
                         continue
 
@@ -386,6 +401,8 @@ def scanner_engine():
                 p_num = data['price']
                 vol_raw = data['vol_raw']
                 rvol = data['rvol_tw']
+                ema49 = data['ema49']
+                dist_3_ago = data['dist_3_ago']
                 
                 f, a, prev_close = get_static(sym)
                 float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
@@ -462,22 +479,47 @@ def scanner_engine():
                 sniper_triggered = False
                 sniper_label = ""
                 
+                # 🎯 戰術 1：事前突破預警黃燈 (距離 HOD 1.5% 內，且量能放大)
+                dist_to_hod = (cell["HOD"] - p_num) / p_num if p_num > 0 else 1
+                if 0 < dist_to_hod <= 0.015 and vol_raw >= surge_vol_threshold * 0.5:
+                    sniper_triggered = True
+                    sniper_label = "⏳準備突破"
+                
+                # 🧲 戰術 2：EMA 49 磁吸回踩預警
+                if ema49 > 0:
+                    dist_now = abs(p_num - ema49)
+                    # 條件：現在距離 0.1~0.3 內，且 3 根 K 棒前距離比現在大一倍以上 (代表急殺或急拉靠近)
+                    if 0.1 <= dist_now <= 0.3 and dist_3_ago > dist_now * 2:
+                        sniper_triggered = True
+                        sniper_label = "🧲EMA49回踩準備"
+                
+                # 原有的事後確認突破邏輯
                 if p_num > recent_high:
                     if is_pullback:
-                        if p_num > cell["pullback_low"] * 1.01: sniper_triggered = True; sniper_label = "🎯精準回調"
+                        if p_num > cell["pullback_low"] * 1.01: 
+                            sniper_triggered = True
+                            sniper_label = "🎯精準回調"
                         is_pullback = False
                         surge_start_price = p_num
                         max_surge_vol = curr_vol_delta
                     else: max_surge_vol = max(max_surge_vol, curr_vol_delta)
                     recent_high = p_num
+                    
                     if is_hod_break:
-                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0: sniper_triggered = True; sniper_label = "⚠️爆量(短線留意)"
-                        elif curr_vol_delta > 0 and curr_vol_delta < 5000: sniper_triggered = True; sniper_label = "⚠️虛漲(無量誘多)"
+                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0: 
+                            sniper_triggered = True
+                            sniper_label = "⚠️爆量突破"
+                        elif curr_vol_delta > 0 and curr_vol_delta < 5000: 
+                            sniper_triggered = True
+                            sniper_label = "⚠️虛漲(無量誘多)"
+                            
                 elif p_num < last_price:
                     swing_size = recent_high - surge_start_price
                     retrace_ratio = (recent_high - p_num) / swing_size if swing_size > 0 else 0
                     if retrace_ratio <= 0.50:
-                        if not is_pullback: is_pullback = True; cell["pullback_low"] = p_num
+                        if not is_pullback: 
+                            is_pullback = True
+                            cell["pullback_low"] = p_num
                         else: cell["pullback_low"] = min(cell["pullback_low"], p_num)
                     else: is_pullback = False 
 
@@ -485,8 +527,12 @@ def scanner_engine():
                 cell["surge_start_price"] = surge_start_price
                 cell["is_pullback"] = is_pullback
                 cell["max_surge_vol"] = max_surge_vol
-                cell["sniper_triggered"] = sniper_triggered
-                if sniper_triggered: cell["sniper_label"] = sniper_label
+                
+                if sniper_triggered: 
+                    cell["sniper_triggered"] = True
+                    cell["sniper_label"] = sniper_label
+                else:
+                    cell["sniper_triggered"] = False
                 
                 streak_text = f"x{cell['streak']}"
                 if is_hod_break: streak_text = f"⭐破高+{cell['sniper_label']}" if sniper_triggered else f"⭐破高{streak_text}"
@@ -510,6 +556,7 @@ def scanner_engine():
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
+                # 如果觸發預警，或者發生真正的爆量突破，直接打進動能追蹤板！
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
                     if not sniper_triggered: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
@@ -548,7 +595,8 @@ def scanner_engine():
                 "scan_count": count
             })
             
-            time.sleep(random.randint(4, 12))
+            # 🚨 極限輪詢：把原本的隨機 4~12 秒，暴力壓縮到 3 秒！消滅所有報價盲區。
+            time.sleep(3)
             
         except Exception as e:
             if "database is locked" not in str(e) and "NoneType" not in str(e): print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}", flush=True)
