@@ -38,19 +38,18 @@ CATALYST_KEYWORDS = [
 ]
 
 # ==========================================
-# 🔍 核心武器：遞迴 JSON 拆解器 (不漏接任何新聞)
+# 🔍 終極遞迴 JSON 拆解器 (含字串穿透解析)
 # ==========================================
 def find_news_in_json(obj, results=None):
     if results is None:
         results = []
     if isinstance(obj, dict):
-        # 只要字典裡同時包含這三個關鍵字，就判定為新聞物件！
-        if "title" in obj and "newsTime" in obj and "newsUrl" in obj:
-            if len(obj["title"]) > 10 and "Webull" not in obj["title"]:
+        if "title" in obj and "newsTime" in obj:
+            if len(str(obj.get("title", ""))) > 5 and "Webull" not in str(obj.get("title", "")):
                 results.append({
                     "title": obj["title"],
                     "newsTime": obj["newsTime"],
-                    "newsUrl": obj["newsUrl"],
+                    "newsUrl": obj.get("newsUrl", ""),
                     "id": obj.get("id", str(random.randint(1000, 99999)))
                 })
         for key, value in obj.items():
@@ -58,14 +57,21 @@ def find_news_in_json(obj, results=None):
     elif isinstance(obj, list):
         for item in obj:
             find_news_in_json(item, results)
+    elif isinstance(obj, str):
+        # 破解微牛可能將 JSON 轉為字串隱藏的招數
+        if obj.startswith('{') or obj.startswith('['):
+            try:
+                parsed = json.loads(obj)
+                find_news_in_json(parsed, results)
+            except: pass
     return results
 
 # ==========================================
-# 📰 微牛 (Webull) 公開網頁暴力爬蟲引擎
+# 📰 微牛 (Webull) 新聞偵錯引擎 (Debug Mode)
 # ==========================================
 def fetch_webull_news_bg(ticker, cell):
     try:
-        # 🛡️ 隨機秒數等待 (0.5 ~ 2秒)，打破機械化節奏
+        print(f"🕵️‍♂️ [DEBUG {ticker}] 準備擷取新聞...")
         time.sleep(random.uniform(0.5, 2.0))
         
         tz_ny = pytz.timezone('America/New_York')
@@ -77,32 +83,41 @@ def fetch_webull_news_bg(ticker, cell):
         data = res.json()
         ticker_list = data.get("data", [])
         if not ticker_list:
+            print(f"❌ [DEBUG {ticker}] 查無微牛代碼")
             raise ValueError("查無微牛代碼")
             
         t_info = ticker_list[0]
         ticker_id = t_info.get("tickerId")
         exchange = str(t_info.get("disExchangeCode", "nasdaq")).lower()
         
-        # 2. 模擬真人訪問 Webull 公開網頁版新聞區
+        print(f"✅ [DEBUG {ticker}] 取得微牛 ID: {ticker_id}, 交易所: {exchange}")
+        
         web_url = f"https://www.webull.com/quote/{exchange}-{ticker.lower()}/news"
         html_res = scraper.get(web_url, timeout=15)
         html_text = html_res.text
         
+        print(f"✅ [DEBUG {ticker}] 抓取網頁原始碼，長度: {len(html_text)}，狀態碼: {html_res.status_code}")
+        
         raw_news = []
         
-        # 3. 暴力挖礦：找出 __NEXT_DATA__ 並用遞迴拆解器找出所有新聞！
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text, re.DOTALL)
         if match:
+            print(f"✅ [DEBUG {ticker}] 成功找到網頁資料庫區塊 (__NEXT_DATA__)")
             try:
                 json_data = json.loads(match.group(1))
                 raw_news = find_news_in_json(json_data)
-            except: pass
+                print(f"✅ [DEBUG {ticker}] 暴力拆解成功，找到 {len(raw_news)} 筆原始新聞")
+            except Exception as e:
+                print(f"❌ [DEBUG {ticker}] 網頁 JSON 解析失敗: {e}")
+        else:
+            print(f"❌ [DEBUG {ticker}] 找不到網頁資料庫區塊，可能被微牛改版擋住了")
             
-        # 4. 如果網頁底層真的被掏空了，啟動 API 備案通道 (即使沒登入也碰碰運氣)
         if not raw_news:
+            print(f"⚠️ [DEBUG {ticker}] 網頁失敗，啟動備案 API 通道...")
             api_url = f"https://quotes-gw.webullfintech.com/api/information/news/v8/tickerNews?tickerId={ticker_id}&currentNewsId=0&pageSize=10"
             api_res = scraper.get(api_url, timeout=10).json()
             api_news = api_res.get("news", [])
+            print(f"⚠️ [DEBUG {ticker}] 備案 API 回傳了 {len(api_news)} 筆新聞")
             for n in api_news:
                 raw_news.append({
                     "title": n.get("title", ""),
@@ -111,9 +126,7 @@ def fetch_webull_news_bg(ticker, cell):
                     "id": str(n.get("id", random.randint(1000, 99999)))
                 })
 
-        # 5. 過濾 4 天前的新聞，並標記今日顏色
         valid_news = []
-        # 用標題做去重，避免微牛重複推送
         seen_titles = set()
         
         for n in raw_news:
@@ -124,24 +137,23 @@ def fetch_webull_news_bg(ticker, cell):
             if not title or not pub_time_str or title in seen_titles: continue
             seen_titles.add(title)
             
-            # 時間計算 (支援 2026-03-27 15:30:00 與 2026-03-27T15:30:00Z 兩種格式)
             try:
                 pub_date_only = pub_time_str[:10]
                 pub_dt = datetime.strptime(pub_date_only, "%Y-%m-%d")
                 days_diff = (now_ny.date() - pub_dt.date()).days
-            except:
+            except Exception as e:
+                print(f"❌ [DEBUG {ticker}] 日期解析錯誤: {pub_time_str}")
                 days_diff = 0
                 pub_date_only = ""
                 
-            # 【需求】：最多讀取 4 天前的新聞
+            print(f"🔍 [DEBUG {ticker}] 驗證中: {pub_date_only} (距今 {days_diff} 天) - {title[:20]}...")
+            
             if days_diff > 4: 
+                print(f"   -> 🛑 放棄：超過 4 天")
                 continue
                 
-            # 【需求】：當天日期判斷 (前端會變橘色)
             is_today = (pub_date_only == today_str)
                 
-            # 擷取顯示文字 (今日只顯示 HH:MM，其他顯示 MM-DD)
-            # 處理 'T' 格式的字串
             clean_time_str = pub_time_str.replace('T', ' ')
             time_display = clean_time_str[11:16] if len(clean_time_str) >= 16 else ""
             date_display = clean_time_str[5:10] if len(clean_time_str) >= 10 else ""
@@ -161,14 +173,16 @@ def fetch_webull_news_bg(ticker, cell):
             
         if valid_news:
             cell["NewsList"] = valid_news
+            print(f"✅ [DEBUG {ticker}] 最終成功寫入 {len(valid_news)} 筆新聞！")
         else:
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+            print(f"⚠️ [DEBUG {ticker}] 最終結果：近 4 天無有效新聞")
             
     except Exception as e:
+        print(f"❌ [DEBUG {ticker}] 致命錯誤閃退: {e}")
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
-        cell["NewsList"] = [{"id": "0", "title": f"🗞️ 微牛網頁爬蟲遭阻擋，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
-
+        cell["NewsList"] = [{"id": "0", "title": f"🗞️ 微牛爬蟲失敗，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
 
 def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
@@ -230,7 +244,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ Webull 飆股主引擎 (嚴守 ROSS 排行榜邏輯)
+# ★ Webull 飆股主引擎
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -391,7 +405,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.1 (微牛新聞無死角暴力拆解版)...")
+    print("🔥 啟動 V12.2 (微牛探測雷達版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
