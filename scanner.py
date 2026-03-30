@@ -3,13 +3,13 @@ from datetime import datetime
 import pytz
 import yfinance as yf
 import pandas as pd
-from playwright.sync_api import sync_playwright
 from io import StringIO 
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 import config
 
+# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -55,7 +55,7 @@ def translate_to_zh(text):
     return text 
 
 # ==========================================
-# 📰 終極新聞管線 (捨棄延遲RSS，改用 yfinance 直連 API)
+# 📰 終極新聞管線 (yfinance 原生無快取 API)
 # ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
@@ -65,7 +65,6 @@ def fetch_direct_news_bg(ticker, cell):
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
         
-        # 🚨 V14 升級：直接呼叫 Yahoo 前端無快取 API，取代慢速的 RSS
         tkr = yf.Ticker(ticker)
         news_items = tkr.news
         
@@ -86,7 +85,7 @@ def fetch_direct_news_bg(ticker, cell):
             except Exception:
                 days_diff, pub_date_only, pub_time_only = 0, "", ""
                 
-            if days_diff > 4: continue # 保持 4 天紀律
+            if days_diff > 4: continue 
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
@@ -172,152 +171,99 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ 微牛主帥引擎 (瀏覽器常駐效能版)
+# ★ V15 全新刺客引擎 (TradingView API 直連)
 # ==========================================
-def fetch_webull_gainers():
+def fetch_tv_gainers():
     global auto_hot_symbols, feed_gappers
     tz_tw = pytz.timezone('Asia/Taipei')
     
     while True:
         try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-                context = browser.new_context(user_agent="Mozilla/5.0")
-                page = context.new_page()
-                page.goto("https://app.webull.com/screener", timeout=30000)
-                time.sleep(3) 
+            rank_type, market_status = get_market_rank_type()
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ TradingView API 掃描 ({market_status})...", flush=True)
+            
+            # 🚀 TV 的原生 JSON API，極致輕量、無須開瀏覽器！
+            sort_field = "premarket_change" if rank_type == "2" else "change"
+            
+            payload = {
+                "filter": [
+                    {"left": "close", "operation": "in_range", "right": [0.5, 50]}
+                ],
+                "options": {"lang": "en"},
+                "markets": ["america"],
+                "symbols": {"query": {"types": []}, "tickers": []},
+                "columns": ["name", "close", "change", "volume", "premarket_close", "premarket_change", "premarket_volume"],
+                "sort": {"sortBy": sort_field, "sortOrder": "desc"},
+                "range": [0, 30]
+            }
+            
+            res = scraper.post("https://scanner.tradingview.com/america/scan", json=payload, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+                new_found = []
                 
-                for _ in range(100):
-                    try:
-                        rank_type, market_status = get_market_rank_type()
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜掃描 ({market_status})...", flush=True)
-                        sort_id = "fm_53" if rank_type == "2" else "fm_12"
-                        
-                        js_code = f"""
-                        async () => {{
-                            const payload = {{
-                                "fetch": 30,
-                                "rules": [
-                                    {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}},
-                                    {{"proId": "fm_43", "rule": "between", "val": ["0", "999999999"]}},
-                                    {{"proId": "fm_14", "rule": "between", "val": ["100", "999999999"]}}
-                                ],
-                                "sort": {{"rule": "desc", "proId": "{sort_id}"}}
-                            }};
-                            const res = await fetch('https://quotes-gw.webullfintech.com/api/wlas/screener/screener', {{
-                                method: 'POST',
-                                headers: {{'Content-Type': 'application/json'}},
-                                body: JSON.stringify(payload)
-                            }});
-                            return await res.json();
-                        }}
-                        """
-                        data = page.evaluate(js_code)
-                        
-                        new_found = []
-                        for item in reversed(data.get('data', [])):
-                            sym = item.get('ticker', {}).get('symbol')
-                            if sym and '-' not in sym:
-                                if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
-                                new_found.append(sym)
-                                
-                                f, avg_vol, prev_close = get_static(sym)
-                                float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                                price_raw = item.get('price') or item.get('pPrice') or item.get('close') or '0'
-                                changeRatio = item.get('changeRatio') or item.get('pChangeRatio') or '0'
-                                changeAmt_raw = item.get('change') or item.get('pChange') or '0'
-                                vol = item.get('volume') or item.get('pVolume') or '0'
-                                
-                                try: vol_float = float(vol)
-                                except: vol_float = 0.0
-                                try: chg_float = float(changeRatio) * 100
-                                except: chg_float = 0.0
-                                chg_str = f"+{chg_float:.2f}%" if chg_float > 0 else f"{chg_float:.2f}%"
-                                try: chg_amt_float = float(changeAmt_raw)
-                                except: chg_amt_float = 0.0
-                                chg_amt_str = f"+${chg_amt_float:.2f}" if chg_amt_float > 0 else f"-${abs(chg_amt_float):.2f}"
-                                rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
-                                
-                                new_entry = {
-                                    "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
-                                    "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
-                                    "ChangeAmt": chg_amt_str, "Change": chg_str, "Volume": format_vol_km(vol_float),
-                                    "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x", "FloatStr": float_str,
-                                    "discovery_time": time.time()
-                                }
-                                update_or_add_gapper(new_entry)
-                        
-                        if new_found:
-                            feed_gappers = feed_gappers[:1000]
-                            auto_hot_symbols = auto_hot_symbols[:200] 
-                        elif not data.get('data', []):
-                            raise ValueError("API回傳空名單")
-                            
-                    except Exception as inner_e:
-                        print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 微牛尚無資料，啟動 StockAnalysis 備用雷達...", flush=True)
-                        try:
-                            rank_type, _ = get_market_rank_type()
-                            url = "https://stockanalysis.com/markets/premarket/" if rank_type == "2" else "https://stockanalysis.com/markets/gainers/"
-                            res = scraper.get(url, timeout=15)
-                            df_list = pd.read_html(StringIO(res.text))
-                            if df_list:
-                                df = df_list[0]
-                                price_col = next((c for c in df.columns if 'price' in c.lower() or 'last' in c.lower()), None)
-                                change_col = next((c for c in df.columns if '%' in c or 'change' in c.lower()), None)
-                                change_amt_col = next((c for c in df.columns if 'change' in c.lower() and '%' not in c), None)
-                                vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
-                                
-                                new_found = []
-                                for idx, row in df.iloc[::-1].iterrows():
-                                    sym = str(row.get('Symbol', ''))
-                                    if sym and '-' not in sym:
-                                        p_val_str = str(row[price_col]).replace('$', '') if price_col and pd.notna(row[price_col]) else '0'
-                                        try: p_val_float = float(p_val_str)
-                                        except: p_val_float = 0.0
-                                        if p_val_float < 0.5 or p_val_float > 50: continue
-                                        
-                                        if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
-                                        new_found.append(sym)
-                                        f, avg_vol, prev_close = get_static(sym)
-                                        float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                                        c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
-                                        c_amt_val = str(row[change_amt_col]).replace('+', '').replace('$', '') if change_amt_col and pd.notna(row[change_amt_col]) else '0'
-                                        v_float = parse_vol_to_float(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else 0.0
-                                        try: c_amt_float = float(c_amt_val)
-                                        except: c_amt_float = 0.0
-                                        chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
-                                        rvol_val = (v_float / 50000.0) if avg_vol == 500000 else (v_float / avg_vol)
-                                        
-                                        new_entry = {
-                                            "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
-                                            "Price": f"${p_val_float:.2f}",
-                                            "ChangeAmt": chg_amt_str, "Change": c_val if '%' in c_val else f"{c_val}%",
-                                            "Volume": format_vol_km(v_float), "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
-                                            "FloatStr": float_str, "discovery_time": time.time()
-                                        }
-                                        update_or_add_gapper(new_entry)
-                                        if len(new_found) >= 30: break 
-                                if new_found:
-                                    feed_gappers = feed_gappers[:1000]
-                                    auto_hot_symbols = auto_hot_symbols[:200]
-                        except: pass
-                    # 🚨 V14：主引擎掃描間隔極限壓縮，逼出速度！
-                    time.sleep(random.randint(3, 5))
-                browser.close() 
+                # 反向迭代以保持最新在最前面
+                for item in reversed(data.get("data", [])):
+                    cols = item.get("d", [])
+                    if not cols or len(cols) < 7: continue
+                    
+                    sym_raw = str(cols[0])
+                    sym = sym_raw.split(':')[-1] if ':' in sym_raw else sym_raw
+                    
+                    if '-' in sym: continue
+                    if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
+                    new_found.append(sym)
+                    
+                    f, avg_vol, prev_close = get_static(sym)
+                    float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                    
+                    # 判斷盤前還是盤中資料
+                    if rank_type == "2":
+                        p_val_float = float(cols[4]) if cols[4] is not None else float(cols[1])
+                        c_val_float = float(cols[5]) if cols[5] is not None else float(cols[2])
+                        v_float = float(cols[6]) if cols[6] is not None else float(cols[3])
+                    else:
+                        p_val_float = float(cols[1]) if cols[1] is not None else 0.0
+                        c_val_float = float(cols[2]) if cols[2] is not None else 0.0
+                        v_float = float(cols[3]) if cols[3] is not None else 0.0
+                    
+                    c_amt_float = p_val_float - prev_close if prev_close > 0 else 0.0
+                    
+                    chg_str = f"+{c_val_float:.2f}%" if c_val_float > 0 else f"{c_val_float:.2f}%"
+                    chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
+                    rvol_val = (v_float / 50000.0) if avg_vol == 500000 else (v_float / avg_vol)
+                    
+                    new_entry = {
+                        "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
+                        "Price": f"${p_val_float:.2f}",
+                        "ChangeAmt": chg_amt_str, "Change": chg_str, 
+                        "Volume": format_vol_km(v_float), "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
+                        "FloatStr": float_str, "discovery_time": time.time()
+                    }
+                    update_or_add_gapper(new_entry)
+                
+                if new_found:
+                    feed_gappers = feed_gappers[:1000]
+                    auto_hot_symbols = auto_hot_symbols[:200] 
+            else:
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 回傳狀態碼異常: {res.status_code}", flush=True)
+                
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 瀏覽器環境重置: {e}", flush=True)
-            time.sleep(5)
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 掃描錯誤: {e}", flush=True)
+            
+        time.sleep(random.randint(3, 5))
 
 # ==========================================
-# ★ V14 狙擊手追蹤引擎 (預判突破 + EMA49 磁吸)
+# ★ 主控引擎 (EMA49預測 + TV極速對接)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V14 終極預判狙擊版 (EMA49 磁吸+瞬時新聞)...", flush=True)
+    print("🔥 啟動 V15 終極刺客版 (TradingView API 直連)...", flush=True)
     
-    threading.Thread(target=fetch_webull_gainers, daemon=True).start()
+    # 啟動輕量化的 TV API 引擎
+    threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     wait_count = 0
     while True:
@@ -334,7 +280,7 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...", flush=True)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 暫無足夠動能之股票，雷達待命中...", flush=True)
                 wait_count += 1
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
@@ -357,7 +303,6 @@ def scanner_engine():
             if not data_df.empty:
                 for sym in symbols_to_track:
                     try:
-                        # 🚨 擷取完整的 1m 收盤價序列，準備計算 EMA49 與判斷動能
                         if isinstance(data_df.columns, pd.MultiIndex):
                             if sym in data_df.columns.get_level_values(0):
                                 close_series = data_df[sym]['Close'].dropna()
@@ -374,14 +319,11 @@ def scanner_engine():
                             p_num = float(close_series.iloc[-1])
                             vol = float(vol_series.iloc[-1])
                             
-                            # EMA 49 計算 (需要至少 10 根 K 線才具備參考價值)
                             ema49_val = 0.0
                             dist_3_ago = 999.0
                             if len(close_series) >= 10:
                                 ema49_series = close_series.ewm(span=49, adjust=False).mean()
                                 ema49_val = float(ema49_series.iloc[-1])
-                                
-                                # 取得 3 分鐘前與 EMA49 的距離
                                 if len(close_series) >= 4:
                                     dist_3_ago = abs(float(close_series.iloc[-4]) - float(ema49_series.iloc[-4]))
                                 
@@ -479,21 +421,17 @@ def scanner_engine():
                 sniper_triggered = False
                 sniper_label = ""
                 
-                # 🎯 戰術 1：事前突破預警黃燈 (距離 HOD 1.5% 內，且量能放大)
                 dist_to_hod = (cell["HOD"] - p_num) / p_num if p_num > 0 else 1
                 if 0 < dist_to_hod <= 0.015 and vol_raw >= surge_vol_threshold * 0.5:
                     sniper_triggered = True
                     sniper_label = "⏳準備突破"
                 
-                # 🧲 戰術 2：EMA 49 磁吸回踩預警
                 if ema49 > 0:
                     dist_now = abs(p_num - ema49)
-                    # 條件：現在距離 0.1~0.3 內，且 3 根 K 棒前距離比現在大一倍以上 (代表急殺或急拉靠近)
                     if 0.1 <= dist_now <= 0.3 and dist_3_ago > dist_now * 2:
                         sniper_triggered = True
                         sniper_label = "🧲EMA49回踩準備"
                 
-                # 原有的事後確認突破邏輯
                 if p_num > recent_high:
                     if is_pullback:
                         if p_num > cell["pullback_low"] * 1.01: 
@@ -556,7 +494,6 @@ def scanner_engine():
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
-                # 如果觸發預警，或者發生真正的爆量突破，直接打進動能追蹤板！
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
                     if not sniper_triggered: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
@@ -595,7 +532,6 @@ def scanner_engine():
                 "scan_count": count
             })
             
-            # 🚨 極限輪詢：把原本的隨機 4~12 秒，暴力壓縮到 3 秒！消滅所有報價盲區。
             time.sleep(3)
             
         except Exception as e:
