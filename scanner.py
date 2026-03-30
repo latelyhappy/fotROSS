@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
+# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -19,6 +20,7 @@ def log_debug(ticker, msg):
     time_str = datetime.now(tz_tw).strftime('%H:%M:%S')
     print(f"[{time_str}] 🕵️‍♂️ [DEBUG {ticker}] {msg}", flush=True)
 
+# 🛡️ 啟動 Cloudscraper 破甲模式 (用來對付 API 防火牆)
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
@@ -39,6 +41,9 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
+# ==========================================
+# 🌐 Google 神經網路翻譯引擎
+# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -50,6 +55,9 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
+# ==========================================
+# 📰 終極新聞管線 (直搗 Yahoo 底層搜尋 API，零快取延遲)
+# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = []
@@ -58,8 +66,15 @@ def fetch_direct_news_bg(ticker, cell):
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
         
-        tkr = yf.Ticker(ticker)
-        news_items = tkr.news
+        # 🚨 V15.3 核心：直接敲擊 Yahoo 財經底層搜尋 API
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&quotesCount=0&newsCount=5"
+        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"}, timeout=5)
+        
+        if res.status_code == 200:
+            news_items = res.json().get('news', [])
+        else:
+            news_items = []
+            log_debug(ticker, f"⚠️ Yahoo API 連線異常: {res.status_code}")
         
         new_articles = []
         for item in news_items:
@@ -83,14 +98,16 @@ def fetch_direct_news_bg(ticker, cell):
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
             
-            log_debug(ticker, f"✨ 攔截瞬時公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
+            log_debug(ticker, f"✨ 成功攔截瞬時公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
+            
             cell["raw_news_titles"].append(raw_title)
             
             new_articles.append({
                 "id": str(random.randint(10000, 99999)), "title": translated_title,
                 "score": 0, "link": raw_link, "time": display_str, "is_today": is_today, "is_read": False
             })
+            
             if len(new_articles) >= 5: break
             
         if new_articles:
@@ -99,9 +116,10 @@ def fetch_direct_news_bg(ticker, cell):
             log_debug(ticker, f"🎉 成功新增並翻譯 {len(new_articles)} 筆突發新聞！")
         elif not cell.get("NewsList") or "🗞️" in cell["NewsList"][0].get("title", ""):
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
-            cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+            cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近 4 天無重大新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
             
     except Exception as e:
+        log_debug(ticker, f"🚨 新聞擷取發生例外錯誤: {e}")
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
         cell["NewsList"] = [{"id": "0", "title": f"🗞️ 新聞直連失敗，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
 
@@ -164,7 +182,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ V15.2 刺客引擎 (精準剔除 OTC 垃圾股)
+# ★ V15.2 刺客引擎 (TradingView API + 物理剔除粉紅單)
 # ==========================================
 def fetch_tv_gainers():
     global auto_hot_symbols, feed_gappers
@@ -179,7 +197,9 @@ def fetch_tv_gainers():
             
             payload = {
                 "filter": [
-                    {"left": "close", "operation": "in_range", "right": [0.5, 50]}
+                    {"left": "close", "operation": "in_range", "right": [0.5, 50]},
+                    # 保險機制：要求過濾正規交易所
+                    {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]}
                 ],
                 "options": {"lang": "en"},
                 "markets": ["america"],
@@ -201,7 +221,7 @@ def fetch_tv_gainers():
                     sym_raw = str(cols[0])
                     sym = sym_raw.split(':')[-1] if ':' in sym_raw else sym_raw
                     
-                    # 🚨 終極物理過濾：只要代碼超過 4 個字 (粉紅單)，或包含破折號，直接踢掉！
+                    # 🚨 物理守衛：只允許 1~4 個字母的正統股，剔除所有 5 字母的店頭垃圾股
                     if '-' in sym or len(sym) > 4: 
                         continue
                         
@@ -237,9 +257,10 @@ def fetch_tv_gainers():
                 
                 if new_found:
                     feed_gappers = feed_gappers[:1000]
-                    auto_hot_symbols = auto_hot_symbols[:200] 
+                    # 限制動能池不超過 100 檔，確保資源集中在真正活躍的股票
+                    auto_hot_symbols = auto_hot_symbols[:100] 
             else:
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 回傳狀態碼異常: {res.status_code}", flush=True)
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 回傳異常: {res.status_code}", flush=True)
                 
         except Exception as e:
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 掃描錯誤: {e}", flush=True)
@@ -247,13 +268,13 @@ def fetch_tv_gainers():
         time.sleep(random.randint(3, 5))
 
 # ==========================================
-# ★ 主控引擎 (EMA49預測 + TV極速對接)
+# ★ 主控引擎 (EMA49預測 + TV極速對接 + 3秒極限輪詢)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V15.2 終極刺客版 (長度過濾徹底消滅粉紅單)...", flush=True)
+    print("🔥 啟動 V15.3 終極刺客版 (零延遲新聞 + 長度守衛 + EMA49磁吸)...", flush=True)
     
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
@@ -269,7 +290,7 @@ def scanner_engine():
                     gap_entry['FloatStr'] = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                     if "ChangeAmt" not in gap_entry: gap_entry['ChangeAmt'] = "$0.00"
 
-            symbols_to_track = list(set(auto_hot_symbols[:200]))
+            symbols_to_track = list(set(auto_hot_symbols[:100]))
             
             if not symbols_to_track:
                 if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 暫無足夠動能之股票，雷達待命中...", flush=True)
@@ -289,6 +310,7 @@ def scanner_engine():
             surge_vol_threshold = 2000 if rank_type == "2" else 10000
             
             with yf_lock:
+                # 限制 threads=10 防止 Yahoo API 阻塞
                 data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker', threads=10)
             
             extracted_stocks = []
@@ -525,6 +547,7 @@ def scanner_engine():
                 "scan_count": count
             })
             
+            # 極速防護輪詢：3 秒鐘刷一次，精準預判！
             time.sleep(3)
             
         except Exception as e:
