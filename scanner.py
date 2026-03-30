@@ -5,6 +5,7 @@ import yfinance as yf
 import pandas as pd
 from playwright.sync_api import sync_playwright
 from io import StringIO 
+import re, json
 from concurrent.futures import ThreadPoolExecutor
 
 import config
@@ -37,62 +38,115 @@ CATALYST_KEYWORDS = [
 ]
 
 # ==========================================
-# 📰 新增：微牛 (Webull) 即時新聞直連引擎
+# 📰 微牛 (Webull) 公開網頁暴力爬蟲引擎
 # ==========================================
 def fetch_webull_news_bg(ticker, cell):
     try:
-        # 🛡️ 隨機秒數等待 (0.5 ~ 2秒)，打破機械化節奏，防止被微牛封鎖
+        # 🛡️ 隨機秒數等待 (0.5 ~ 2秒)，打破機械化節奏
         time.sleep(random.uniform(0.5, 2.0))
         
-        # 1. 取得微牛內部 TickerID
+        tz_ny = pytz.timezone('America/New_York')
+        now_ny = datetime.now(tz_ny)
+        today_str = now_ny.strftime("%Y-%m-%d")
+        
+        # 1. 取得微牛內部 TickerID 與 交易所代碼
         search_url = f"https://quotes-gw.webullfintech.com/api/search/pc/tickers?keyword={ticker}&regionId=6&pageIndex=1&pageSize=1"
         res = scraper.get(search_url, timeout=10)
         data = res.json()
         ticker_list = data.get("data", [])
         if not ticker_list:
-            raise ValueError("No tickerId")
+            raise ValueError("查無股票")
             
-        ticker_id = ticker_list[0].get("tickerId")
+        t_info = ticker_list[0]
+        ticker_id = t_info.get("tickerId")
+        exchange = str(t_info.get("disExchangeCode", "nasdaq")).lower()
         
-        # 2. 用 TickerID 抓取微牛最新即時新聞
-        news_url = f"https://quotes-gw.webullfintech.com/api/information/news/v8/tickerNews?tickerId={ticker_id}&currentNewsId=0&pageSize=10"
+        # 2. 模擬真人訪問 Webull 公開網頁版新聞區
+        web_url = f"https://www.webull.com/quote/{exchange}-{ticker.lower()}/news"
+        html_res = scraper.get(web_url, timeout=15)
+        html_text = html_res.text
         
-        n_res = scraper.get(news_url, timeout=10)
-        news_data = n_res.json()
+        raw_news = []
         
-        news_list = []
-        for n in news_data.get("news", [])[:5]:
-            title = n.get("title", "")
-            link = n.get("newsUrl", "")
-            pub_time = n.get("newsTime", "")
-            
-            # 時間格式化處理 (從 2024-03-27 15:30:00 擷取 15:30)
+        # 3. 嘗試解析微牛網頁底層的 __NEXT_DATA__ JSON 結構
+        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html_text)
+        if match:
             try:
-                if len(pub_time) > 10:
-                    time_str = pub_time[11:16] 
-                else:
-                    time_str = ""
-            except:
-                time_str = ""
+                # 不管結構多深，直接轉成字串暴力正則抓取新聞標題與時間
+                raw_data_str = match.group(1)
+                titles = re.findall(r'"title":"([^"]+)"', raw_data_str)
+                times = re.findall(r'"newsTime":"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})"', raw_data_str)
+                links = re.findall(r'"newsUrl":"([^"]+)"', raw_data_str)
                 
-            news_list.append({
-                "id": str(n.get("id", random.randint(1000, 9999))),
+                # 排除雜訊標題 (例如網頁架構文字)
+                clean_titles = [t for t in titles if len(t) > 10 and "Webull" not in t]
+                
+                for i in range(min(len(clean_titles), 10)):
+                    raw_news.append({
+                        "title": clean_titles[i],
+                        "newsTime": times[i] if i < len(times) else "",
+                        "newsUrl": links[i] if i < len(links) else web_url
+                    })
+            except: pass
+            
+        # 4. 如果網頁底層找不到，啟動 API 備案通道
+        if not raw_news:
+            api_url = f"https://quotes-gw.webullfintech.com/api/information/news/v8/tickerNews?tickerId={ticker_id}&currentNewsId=0&pageSize=10"
+            api_res = scraper.get(api_url, timeout=10).json()
+            raw_news = api_res.get("news", [])
+
+        # 5. 過濾 4 天前的新聞，並標記今日顏色
+        valid_news = []
+        for n in raw_news:
+            title = n.get("title", "")
+            link = n.get("newsUrl", web_url)
+            pub_time_str = n.get("newsTime", "")
+            
+            if not title or not pub_time_str: continue
+            
+            # 時間計算
+            try:
+                pub_date_only = pub_time_str[:10]
+                pub_dt = datetime.strptime(pub_date_only, "%Y-%m-%d")
+                days_diff = (now_ny.date() - pub_dt.date()).days
+            except:
+                days_diff = 0
+                pub_date_only = ""
+                
+            # 【需求】：最多讀取 4 天前的新聞
+            if days_diff > 4: 
+                continue
+                
+            # 【需求】：當天日期判斷 (前端會變橘色)
+            is_today = (pub_date_only == today_str)
+                
+            # 擷取顯示文字 (今日只顯示 HH:MM，其他顯示 MM-DD)
+            time_display = pub_time_str[11:16] if len(pub_time_str) >= 16 else ""
+            date_display = pub_time_str[5:10] if len(pub_time_str) >= 10 else ""
+            display_str = f"{time_display}" if is_today else f"{date_display} {time_display}"
+            
+            valid_news.append({
+                "id": str(n.get("id", random.randint(1000, 99999))),
                 "title": title,
                 "score": 0,
                 "link": link,
-                "time": time_str,
+                "time": display_str,
+                "is_today": is_today,
                 "is_read": False
             })
             
-        if news_list:
-            cell["NewsList"] = news_list
+            if len(valid_news) >= 5: break
+            
+        if valid_news:
+            cell["NewsList"] = valid_news
         else:
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
-            cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (微牛無即時新聞)", "score": 0, "link": tw_url, "time": ""}]
+            cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
             
     except Exception as e:
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
-        cell["NewsList"] = [{"id": "0", "title": f"🗞️ 點擊前往 TradingView (微牛新聞擷取失敗)", "score": 0, "link": tw_url, "time": ""}]
+        cell["NewsList"] = [{"id": "0", "title": f"🗞️ 微牛網頁爬蟲遭阻擋，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+
 
 def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
@@ -315,7 +369,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12 (微牛即時新聞直連版)...")
+    print("🔥 啟動 V12 (微牛網頁新聞暴力爬蟲版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -543,10 +597,10 @@ def scanner_engine():
                         item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
-                # 📰 觸發背景微牛新聞檢索
+                # 📰 觸發背景微牛網頁新聞暴力擷取
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
-                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在連線微牛讀取即時新聞...", "score": 0, "link": tw_url, "time": ""}]
+                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在潛入微牛網頁擷取即時新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
                     bg_task_pool.submit(fetch_webull_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
