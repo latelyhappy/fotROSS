@@ -63,12 +63,14 @@ def translate_to_zh(text):
     return text 
 
 # ==========================================
-# 📰 華爾街直連公關專線 (含自動翻譯與智能煞車)
+# 📰 華爾街直連公關專線 (含智能增量更新快取機制)
 # ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
-        log_debug(ticker, "🚀 啟動公關直連專線 (RSS Direct Feed)...")
-        
+        # 建立大腦記憶區塊，用來記住已經翻譯過的新聞標題
+        if "raw_news_titles" not in cell:
+            cell["raw_news_titles"] = set()
+            
         tz_ny = pytz.timezone('America/New_York')
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
@@ -85,17 +87,19 @@ def fetch_direct_news_bg(ticker, cell):
             titles = titles[1:]
             links = links[1:]
             
-        valid_news = []
-        seen_titles = set()
+        new_articles = []
         
         for i in range(min(len(titles), len(dates))):
             raw_title = titles[i].replace("<![CDATA[", "").replace("]]>", "").strip()
             raw_link = links[i] if i < len(links) else f"https://finance.yahoo.com/quote/{ticker}/news"
             pub_date_str = dates[i].strip()
             
-            if not raw_title or raw_title in seen_titles: continue
-            seen_titles.add(raw_title)
+            if not raw_title: continue
             
+            # 🚨 智能快取機制：這篇新聞已經在大腦記憶區了？直接跳過！不浪費資源翻譯！
+            if raw_title in cell["raw_news_titles"]:
+                continue
+                
             try:
                 clean_str = pub_date_str[:-6].strip() 
                 pub_dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
@@ -108,19 +112,19 @@ def fetch_direct_news_bg(ticker, cell):
                 pub_date_only = ""
                 pub_time_only = ""
                 
-            log_debug(ticker, f"🔍 攔截公關稿: {pub_date_only} {pub_time_only} (距今 {days_diff} 天) | {raw_title[:20]}...")
-            
-            # 🚨 智能煞車系統：碰到超過 4 天的，立刻 break 停止往下查！
             if days_diff > 4: 
-                log_debug(ticker, f"   -> 🛑 觸及 4 天界線，立即停止往下查詢")
-                break
+                break # 超過 4 天直接煞車
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
             
+            log_debug(ticker, f"✨ 發現新公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
             
-            valid_news.append({
+            # 將原文標題存入大腦記憶區，下次就不會再翻譯了
+            cell["raw_news_titles"].add(raw_title)
+            
+            new_articles.append({
                 "id": str(random.randint(10000, 99999)),
                 "title": translated_title,
                 "score": 0,
@@ -130,15 +134,20 @@ def fetch_direct_news_bg(ticker, cell):
                 "is_read": False
             })
             
-            if len(valid_news) >= 5: break
+            # 如果是第一次抓，最多抓 5 篇；如果是後續的增量更新，抓到新的為止
+            if len(new_articles) >= 5: break
             
-        if valid_news:
-            cell["NewsList"] = valid_news
-            log_debug(ticker, f"🎉 成功寫入並翻譯 {len(valid_news)} 筆最新公關新聞！")
-        else:
+        # 如果有抓到「新」的新聞，就把它們插隊放到舊新聞的最前面
+        if new_articles:
+            # 清除系統產生的過渡文字
+            clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
+            # 新新聞放前面，舊新聞放後面，總共保留 5 則
+            cell["NewsList"] = (new_articles + clean_old_list)[:5]
+            log_debug(ticker, f"🎉 成功新增並翻譯 {len(new_articles)} 筆突發新聞！")
+        elif not cell.get("NewsList") or "🗞️" in cell["NewsList"][0].get("title", ""):
+            # 如果原本就是空的，而且這次也沒抓到，才顯示無新聞
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
-            log_debug(ticker, "⚠️ 最終判定：近 4 天無有效新聞")
             
     except Exception as e:
         log_debug(ticker, f"❌ 致命錯誤閃退: {e}")
@@ -366,7 +375,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.7 (智能煞車與繁體中文版)...", flush=True)
+    print("🔥 啟動 V12.8 (增量輪詢與快取效能版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -593,10 +602,11 @@ def scanner_engine():
                         item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
-                has_real_news = any(n.get("title", "") and "點擊前往 TradingView" not in n.get("title", "") for n in cell["NewsList"])
-                if not has_real_news and (count % 30 == 0 or count == 0): 
-                    tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
-                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在直連華爾街公關專線擷取新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+                # 🚨 智能輪詢系統：不管是第一次抓，還是每 30 圈 (約 5 分鐘) 的定期巡邏，都派直升機去檢查！
+                if count % 30 == 0 or not cell["NewsList"]: 
+                    if not cell["NewsList"]:
+                        tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
+                        cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在直連華爾街公關專線擷取新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
                     news_task_pool.submit(fetch_direct_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
