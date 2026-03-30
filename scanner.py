@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 雙軌執行緒池：Yahoo 股價與新聞獨立通道
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -56,11 +55,12 @@ def translate_to_zh(text):
     return text 
 
 # ==========================================
-# 📰 華爾街直連公關專線 (含智能增量更新快取機制)
+# 📰 華爾街直連公關專線 (已修復 JSON 當機 Bug)
 # ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
-        if "raw_news_titles" not in cell: cell["raw_news_titles"] = set()
+        # 🚨 關鍵修復：把 set() 換成 list []，防止 jsonify 傳輸時當機！
+        if "raw_news_titles" not in cell: cell["raw_news_titles"] = []
             
         tz_ny = pytz.timezone('America/New_York')
         now_ny = datetime.now(tz_ny)
@@ -85,6 +85,8 @@ def fetch_direct_news_bg(ticker, cell):
             pub_date_str = dates[i].strip()
             
             if not raw_title: continue
+            
+            # 陣列搜尋法
             if raw_title in cell["raw_news_titles"]: continue
                 
             try:
@@ -103,7 +105,9 @@ def fetch_direct_news_bg(ticker, cell):
             
             log_debug(ticker, f"✨ 發現新公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
-            cell["raw_news_titles"].add(raw_title)
+            
+            # 存入陣列中
+            cell["raw_news_titles"].append(raw_title)
             
             new_articles.append({
                 "id": str(random.randint(10000, 99999)), "title": translated_title,
@@ -335,7 +339,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V13 (混血先鋒極早鳥無盲區版)...", flush=True)
+    print("🔥 啟動 V13.1 (修復 JSON 當機 Bug 穩定版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
