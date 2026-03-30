@@ -16,7 +16,6 @@ news_task_pool = ThreadPoolExecutor(max_workers=10)
 
 yf_lock = threading.Lock()
 
-# 🎯 強制立刻印出日誌
 def log_debug(ticker, msg):
     tz_tw = pytz.timezone('Asia/Taipei')
     time_str = datetime.now(tz_tw).strftime('%H:%M:%S')
@@ -43,7 +42,28 @@ CATALYST_KEYWORDS = [
 ]
 
 # ==========================================
-# 📰 華爾街直連公關專線 (Yahoo Direct RSS Feed)
+# 🌐 Google 輕量級神經網路翻譯引擎
+# ==========================================
+def translate_to_zh(text):
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "en",
+            "tl": "zh-TW",
+            "dt": "t",
+            "q": text
+        }
+        res = requests.get(url, params=params, timeout=5)
+        if res.status_code == 200:
+            translated_text = "".join([sentence[0] for sentence in res.json()[0]])
+            return translated_text
+    except Exception as e:
+        pass
+    return text 
+
+# ==========================================
+# 📰 華爾街直連公關專線 (含自動翻譯與智能煞車)
 # ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
@@ -53,17 +73,14 @@ def fetch_direct_news_bg(ticker, cell):
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
         
-        # 這是最原始、最快、零延遲的純文字新聞串流通道
         rss_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
         res = requests.get(rss_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         xml_text = res.text
         
-        # 暴力提取 XML 標籤
         titles = re.findall(r'<title>(.*?)</title>', xml_text)
         links = re.findall(r'<link>(.*?)</link>', xml_text)
         dates = re.findall(r'<pubDate>(.*?)</pubDate>', xml_text)
         
-        # 移除 RSS 本身的頻道標題 (通常是第一個)
         if titles and "Yahoo! Finance" in titles[0]:
             titles = titles[1:]
             links = links[1:]
@@ -80,7 +97,6 @@ def fetch_direct_news_bg(ticker, cell):
             seen_titles.add(raw_title)
             
             try:
-                # 解析公關稿發布的紐約精確時間 (例如: Fri, 27 Mar 2026 09:30:00 -0400)
                 clean_str = pub_date_str[:-6].strip() 
                 pub_dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
                 
@@ -94,16 +110,19 @@ def fetch_direct_news_bg(ticker, cell):
                 
             log_debug(ticker, f"🔍 攔截公關稿: {pub_date_only} {pub_time_only} (距今 {days_diff} 天) | {raw_title[:20]}...")
             
+            # 🚨 智能煞車系統：碰到超過 4 天的，立刻 break 停止往下查！
             if days_diff > 4: 
-                log_debug(ticker, f"   -> 🛑 放棄：太舊 (超過 4 天)")
-                continue
+                log_debug(ticker, f"   -> 🛑 觸及 4 天界線，立即停止往下查詢")
+                break
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
             
+            translated_title = translate_to_zh(raw_title)
+            
             valid_news.append({
                 "id": str(random.randint(10000, 99999)),
-                "title": raw_title,
+                "title": translated_title,
                 "score": 0,
                 "link": raw_link,
                 "time": display_str,
@@ -115,7 +134,7 @@ def fetch_direct_news_bg(ticker, cell):
             
         if valid_news:
             cell["NewsList"] = valid_news
-            log_debug(ticker, f"🎉 成功寫入 {len(valid_news)} 筆最新公關新聞！")
+            log_debug(ticker, f"🎉 成功寫入並翻譯 {len(valid_news)} 筆最新公關新聞！")
         else:
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
@@ -341,13 +360,13 @@ def fetch_webull_gainers():
         time.sleep(random.randint(4, 12))
 
 # ==========================================
-# ★ 副引擎 (只追蹤排行榜中的名單，嚴守 ROSS 紀律)
+# ★ 副引擎
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.5 (華爾街直連公關專線版)...", flush=True)
+    print("🔥 啟動 V12.7 (智能煞車與繁體中文版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -574,7 +593,6 @@ def scanner_engine():
                         item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
-                # 🚁 使用新聞專屬 VIP 執行緒池，直接從華爾街源頭攔截！
                 has_real_news = any(n.get("title", "") and "點擊前往 TradingView" not in n.get("title", "") for n in cell["NewsList"])
                 if not has_real_news and (count % 30 == 0 or count == 0): 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
