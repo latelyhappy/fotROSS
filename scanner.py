@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
+# 🌟 雙軌執行緒池：Yahoo 股價與新聞獨立通道
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -40,6 +41,9 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
+# ==========================================
+# 🌐 Google 神經網路翻譯引擎
+# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -51,6 +55,9 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
+# ==========================================
+# 📰 華爾街直連公關專線 (含智能增量更新快取機制)
+# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = set()
@@ -93,6 +100,8 @@ def fetch_direct_news_bg(ticker, cell):
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
+            
+            log_debug(ticker, f"✨ 發現新公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
             cell["raw_news_titles"].add(raw_title)
             
@@ -105,6 +114,7 @@ def fetch_direct_news_bg(ticker, cell):
         if new_articles:
             clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
             cell["NewsList"] = (new_articles + clean_old_list)[:5]
+            log_debug(ticker, f"🎉 成功新增並翻譯 {len(new_articles)} 筆突發新聞！")
         elif not cell.get("NewsList") or "🗞️" in cell["NewsList"][0].get("title", ""):
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
@@ -172,7 +182,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ 純血 Webull 飆股主引擎 (100股誘捕解鎖版)
+# ★ 混血先鋒飆股雷達 (微牛為主，StockAnalysis 備用)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -181,7 +191,7 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...", flush=True)
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜掃描 ({market_status})...", flush=True)
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -192,7 +202,6 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # 🚨 100股精準誘捕：用最低限度的 100 股與市值限制，滿足微牛運算邏輯，破解空名單魔咒！
                 js_code = f"""
                 async () => {{
                     const payload = {{
@@ -259,10 +268,63 @@ def fetch_webull_gainers():
                     raise ValueError("API回傳空名單")
                     
         except Exception as e:
-            if "API回傳空名單" in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前連 100 股的跳空標的都找不出來，持續監控中...", flush=True)
-            else:
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 掃描異常: {e}", flush=True)
+            # 🚨 無縫切換：當微牛給空資料時，瞬間啟動 StockAnalysis 極限早鳥備用雷達！
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 微牛尚無資料，啟動 StockAnalysis 備用雷達...", flush=True)
+            try:
+                rank_type, _ = get_market_rank_type()
+                url = "https://stockanalysis.com/markets/premarket/" if rank_type == "2" else "https://stockanalysis.com/markets/gainers/"
+                
+                res = scraper.get(url, timeout=15)
+                df_list = pd.read_html(StringIO(res.text))
+                
+                if df_list:
+                    df = df_list[0]
+                    price_col = next((c for c in df.columns if 'price' in c.lower() or 'last' in c.lower()), None)
+                    change_col = next((c for c in df.columns if '%' in c or 'change' in c.lower()), None)
+                    change_amt_col = next((c for c in df.columns if 'change' in c.lower() and '%' not in c), None)
+                    vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
+                    
+                    new_found = []
+                    for idx, row in df.iloc[::-1].iterrows():
+                        sym = str(row.get('Symbol', ''))
+                        if sym and '-' not in sym:
+                            p_val_str = str(row[price_col]).replace('$', '') if price_col and pd.notna(row[price_col]) else '0'
+                            
+                            try: p_val_float = float(p_val_str)
+                            except: p_val_float = 0.0
+                            
+                            # 🎯 嚴格遵守 ROSS 紀律：備用雷達也要過濾 0.5 ~ 50 塊！
+                            if p_val_float < 0.5 or p_val_float > 50:
+                                continue
+                                
+                            if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
+                            new_found.append(sym)
+                            f, avg_vol, prev_close = get_static(sym)
+                            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                            c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
+                            c_amt_val = str(row[change_amt_col]).replace('+', '').replace('$', '') if change_amt_col and pd.notna(row[change_amt_col]) else '0'
+                            v_float = parse_vol_to_float(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else 0.0
+                            try: c_amt_float = float(c_amt_val)
+                            except: c_amt_float = 0.0
+                            chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
+                            rvol_val = (v_float / 50000.0) if avg_vol == 500000 else (v_float / avg_vol)
+                            
+                            new_entry = {
+                                "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
+                                "Price": f"${p_val_float:.2f}",
+                                "ChangeAmt": chg_amt_str, "Change": c_val if '%' in c_val else f"{c_val}%",
+                                "Volume": format_vol_km(v_float), "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
+                                "FloatStr": float_str, "discovery_time": time.time()
+                            }
+                            update_or_add_gapper(new_entry)
+                            
+                            if len(new_found) >= 30: break # 最多只抓 30 檔
+                            
+                    if new_found:
+                        feed_gappers = feed_gappers[:1000]
+                        auto_hot_symbols = auto_hot_symbols[:200]
+            except Exception as ex:
+                pass
                 
         time.sleep(random.randint(4, 12))
 
@@ -273,7 +335,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.12 (微牛 100 股誘捕解鎖版)...", flush=True)
+    print("🔥 啟動 V13 (混血先鋒極早鳥無盲區版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -292,7 +354,7 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ [極早鳥] 暫無微牛榜單資料，雷達待命中...", flush=True)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...", flush=True)
                 wait_count += 1
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
