@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -20,7 +19,6 @@ def log_debug(ticker, msg):
     time_str = datetime.now(tz_tw).strftime('%H:%M:%S')
     print(f"[{time_str}] 🕵️‍♂️ [DEBUG {ticker}] {msg}", flush=True)
 
-# 🛡️ 啟動 Cloudscraper 破甲模式 (用來對付 API 防火牆)
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
@@ -41,9 +39,6 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
-# ==========================================
-# 🌐 Google 神經網路翻譯引擎
-# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -55,9 +50,6 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
-# ==========================================
-# 📰 終極新聞管線 (直搗 Yahoo 底層搜尋 API，零快取延遲)
-# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = []
@@ -66,15 +58,13 @@ def fetch_direct_news_bg(ticker, cell):
         now_ny = datetime.now(tz_ny)
         today_str = now_ny.strftime("%Y-%m-%d")
         
-        # 🚨 V15.3 核心：直接敲擊 Yahoo 財經底層搜尋 API
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&quotesCount=0&newsCount=5"
-        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"}, timeout=5)
+        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=5)
         
         if res.status_code == 200:
             news_items = res.json().get('news', [])
         else:
             news_items = []
-            log_debug(ticker, f"⚠️ Yahoo API 連線異常: {res.status_code}")
         
         new_articles = []
         for item in news_items:
@@ -105,7 +95,8 @@ def fetch_direct_news_bg(ticker, cell):
             
             new_articles.append({
                 "id": str(random.randint(10000, 99999)), "title": translated_title,
-                "score": 0, "link": raw_link, "time": display_str, "is_today": is_today, "is_read": False
+                "score": 0, "link": raw_link, "time": display_str, "is_today": is_today, "is_read": False,
+                "pub_ts": pub_ts # V16 寫入時間戳記供黃金 10 分鐘計算
             })
             
             if len(new_articles) >= 5: break
@@ -119,7 +110,6 @@ def fetch_direct_news_bg(ticker, cell):
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近 4 天無重大新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
             
     except Exception as e:
-        log_debug(ticker, f"🚨 新聞擷取發生例外錯誤: {e}")
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
         cell["NewsList"] = [{"id": "0", "title": f"🗞️ 新聞直連失敗，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
 
@@ -181,9 +171,6 @@ def update_or_add_gapper(new_entry):
             return
     feed_gappers.insert(0, new_entry)
 
-# ==========================================
-# ★ V15.2 刺客引擎 (TradingView API + 物理剔除粉紅單)
-# ==========================================
 def fetch_tv_gainers():
     global auto_hot_symbols, feed_gappers
     tz_tw = pytz.timezone('Asia/Taipei')
@@ -198,7 +185,6 @@ def fetch_tv_gainers():
             payload = {
                 "filter": [
                     {"left": "close", "operation": "in_range", "right": [0.5, 50]},
-                    # 保險機制：要求過濾正規交易所
                     {"left": "exchange", "operation": "in_range", "right": ["NASDAQ", "NYSE", "AMEX"]}
                 ],
                 "options": {"lang": "en"},
@@ -221,9 +207,7 @@ def fetch_tv_gainers():
                     sym_raw = str(cols[0])
                     sym = sym_raw.split(':')[-1] if ':' in sym_raw else sym_raw
                     
-                    # 🚨 物理守衛：只允許 1~4 個字母的正統股，剔除所有 5 字母的店頭垃圾股
-                    if '-' in sym or len(sym) > 4: 
-                        continue
+                    if '-' in sym or len(sym) > 4: continue
                         
                     if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
                     new_found.append(sym)
@@ -243,7 +227,6 @@ def fetch_tv_gainers():
                     c_amt_float = p_val_float - prev_close if prev_close > 0 else 0.0
                     chg_str = f"+{c_val_float:.2f}%" if c_val_float > 0 else f"{c_val_float:.2f}%"
                     chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
-                    
                     rvol_val = (v_float / avg_vol) if avg_vol > 0 else 0.0
                     
                     new_entry = {
@@ -257,32 +240,30 @@ def fetch_tv_gainers():
                 
                 if new_found:
                     feed_gappers = feed_gappers[:1000]
-                    # 限制動能池不超過 100 檔，確保資源集中在真正活躍的股票
                     auto_hot_symbols = auto_hot_symbols[:100] 
             else:
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 回傳異常: {res.status_code}", flush=True)
-                
+                pass
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 TradingView 掃描錯誤: {e}", flush=True)
-            
+            pass
         time.sleep(random.randint(3, 5))
 
 # ==========================================
-# ★ 主控引擎 (EMA49預測 + TV極速對接 + 3秒極限輪詢)
+# ★ 主控引擎 (EMA49多頭護城河 + 黃金 10 分鐘新聞)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V15.3 終極刺客版 (零延遲新聞 + 長度守衛 + EMA49磁吸)...", flush=True)
+    tz_ny = pytz.timezone('America/New_York')
+    print("🔥 啟動 V16 終極覺醒版 (EMA49多頭回踩 + 黃金10分鐘新聞底色)...", flush=True)
     
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     wait_count = 0
     while True:
         try:
-            loop_start_time = time.time()
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
+            now_ny_ts = datetime.now(tz_ny).timestamp()
             
             for gap_entry in feed_gappers:
                 if "FloatStr" not in gap_entry or "ChangeAmt" not in gap_entry:
@@ -295,22 +276,16 @@ def scanner_engine():
             if not symbols_to_track:
                 if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 暫無足夠動能之股票，雷達待命中...", flush=True)
                 wait_count += 1
-                config.MASTER_BRAIN.update({
-                    "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
-                    "high_vol": [], "net_vol_leaders": [], "grinders": [], "news_leaders": [],
-                    "last_update": current_time_tw, "scan_count": count
-                })
+                config.MASTER_BRAIN.update({"gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge, "high_vol": [], "net_vol_leaders": [], "grinders": [], "news_leaders": [], "last_update": current_time_tw, "scan_count": count})
                 count += 1
                 time.sleep(2)
                 continue
                 
             wait_count = 0
-            
             rank_type, market_status = get_market_rank_type()
             surge_vol_threshold = 2000 if rank_type == "2" else 10000
             
             with yf_lock:
-                # 限制 threads=10 防止 Yahoo API 阻塞
                 data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker', threads=10)
             
             extracted_stocks = []
@@ -335,21 +310,28 @@ def scanner_engine():
                             
                             ema49_val = 0.0
                             dist_3_ago = 999.0
+                            ema49_is_uptrend = False
+                            
                             if len(close_series) >= 10:
                                 ema49_series = close_series.ewm(span=49, adjust=False).mean()
                                 ema49_val = float(ema49_series.iloc[-1])
+                                # 🚨 判斷 EMA49 是否呈現「上漲趨勢 (多頭排列)」
+                                if len(ema49_series) >= 2:
+                                    ema49_prev = float(ema49_series.iloc[-2])
+                                    if ema49_val > ema49_prev:
+                                        ema49_is_uptrend = True
+                                
                                 if len(close_series) >= 4:
                                     dist_3_ago = abs(float(close_series.iloc[-4]) - float(ema49_series.iloc[-4]))
                                 
                             extracted_stocks.append({
                                 'sym': sym, 'price': p_num, 'vol_raw': vol, 'rvol_tw': vol / 50000.0,
-                                'ema49': ema49_val, 'dist_3_ago': dist_3_ago
+                                'ema49': ema49_val, 'dist_3_ago': dist_3_ago, 'ema49_is_uptrend': ema49_is_uptrend
                             })
                     except:
                         continue
 
             t_all = []
-            current_t = time.time()
             active_grinders = []
             
             for data in extracted_stocks:
@@ -359,6 +341,7 @@ def scanner_engine():
                 rvol = data['rvol_tw']
                 ema49 = data['ema49']
                 dist_3_ago = data['dist_3_ago']
+                ema49_is_uptrend = data['ema49_is_uptrend']
                 
                 f, a, prev_close = get_static(sym)
                 float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
@@ -367,12 +350,12 @@ def scanner_engine():
                 change_str = f"+{change_pct:.2f}%" if change_pct > 0 else f"{change_pct:.2f}%"
                 chg_amt = p_num - prev_close
                 chg_amt_str = f"+${chg_amt:.2f}" if chg_amt > 0 else f"-${abs(chg_amt):.2f}"
+                rvol_calc = (vol_raw / a) if a > 0 else 0.0
                 
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
                         if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']: gap_entry['Price'] = f"${p_num:.2f}"
                         if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0": gap_entry['Volume'] = format_vol_km(vol_raw)
-                        rvol_calc = (vol_raw / a) if a > 0 else 0.0
                         if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x": gap_entry['RVOL'] = f"{rvol_calc:.1f}x"
                         if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0": gap_entry['Change'] = change_str
                         if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'): gap_entry['ChangeAmt'] = chg_amt_str
@@ -401,6 +384,14 @@ def scanner_engine():
                 cell.setdefault("neg_vol_streak", 0)
                 cell.setdefault("GrindCount", 0)
                 
+                # 判斷是否有 10 分鐘內的熱騰騰新聞
+                has_fresh_news = False
+                for news in cell.get("NewsList", []):
+                    pub_ts = news.get("pub_ts", 0)
+                    if pub_ts > 0 and (now_ny_ts - pub_ts) <= 600: # 600 秒 = 10 分鐘
+                        has_fresh_news = True
+                        break
+
                 is_hod_break = False
                 if p_num > cell["HOD"]: 
                     cell["HOD"] = p_num
@@ -441,11 +432,12 @@ def scanner_engine():
                     sniper_triggered = True
                     sniper_label = "⏳準備突破"
                 
-                if ema49 > 0:
+                # 🚨 V16 EMA49 終極條件：必須在射程內，且 EMA49「必須」是上漲趨勢 (多頭)！
+                if ema49 > 0 and ema49_is_uptrend:
                     dist_now = abs(p_num - ema49)
                     if 0.1 <= dist_now <= 0.3 and dist_3_ago > dist_now * 2:
                         sniper_triggered = True
-                        sniper_label = "🧲EMA49回踩準備"
+                        sniper_label = "🧲EMA49多頭回踩"
                 
                 if p_num > recent_high:
                     if is_pullback:
@@ -500,15 +492,17 @@ def scanner_engine():
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "ChangeAmt": chg_amt_str, "Change": change_str, 
                     "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
-                    "RVOL": f"{rvol_calc:.1f}x" if 'rvol_calc' in locals() and rvol_calc > 0 else "0.0x", "FloatStr": float_str, "Streak": streak_text,
+                    "RVOL": f"{rvol_calc:.1f}x", "FloatStr": float_str, "Streak": streak_text,
                     "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
-                    "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"])
+                    "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"]),
+                    "HasFreshNews": has_fresh_news, "FloatNum": f, "RvolNum": rvol_calc # 傳給前端的視覺化變數
                 }
 
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
+                # 只要觸發 EMA49 多頭回踩 或 突破，直接打進動能表格！
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
                     if not sniper_triggered: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
@@ -547,7 +541,6 @@ def scanner_engine():
                 "scan_count": count
             })
             
-            # 極速防護輪詢：3 秒鐘刷一次，精準預判！
             time.sleep(3)
             
         except Exception as e:
