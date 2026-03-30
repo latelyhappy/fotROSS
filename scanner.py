@@ -5,9 +5,13 @@ import yfinance as yf
 import pandas as pd
 from playwright.sync_api import sync_playwright
 from io import StringIO 
+from concurrent.futures import ThreadPoolExecutor  # 🌟 新增：執行緒池，防止伺服器爆炸
 
 import config
 from news_engine import fetch_news_bg
+
+# 🌟 建立全域執行緒池：限制最多 10 個背景任務同時跑，保護 Railway 資源
+bg_task_pool = ThreadPoolExecutor(max_workers=10)
 
 # 🛡️ Cloudscraper 破甲防護模組
 try:
@@ -54,7 +58,8 @@ def get_static(ticker):
     if ticker in config.stock_cache: return config.stock_cache[ticker]
     else:
         config.stock_cache[ticker] = (1000000, 500000, 1.0) 
-        threading.Thread(target=fetch_static_bg, args=(ticker,), daemon=True).start()
+        # 🌟 改用執行緒池，不再無限制瘋狂開 Thread
+        bg_task_pool.submit(fetch_static_bg, ticker)
         return (1000000, 500000, 1.0)
 
 def parse_vol_to_float(v):
@@ -249,8 +254,9 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V10.2 (記憶體自適應修復版)...")
+    print("🔥 啟動 V10.4 (終極資源管控防崩潰版)...")
     
+    # 確保 Webull 也在背景執行緒獨立運作
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
     wait_count = 0
@@ -270,8 +276,6 @@ def scanner_engine():
             if not symbols_to_track:
                 if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...")
                 wait_count += 1
-                
-                # 即使沒股票，也必須更新前端，讓網頁連線時間保持跳動！
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
                     "high_vol": [], "net_vol_leaders": [], "grinders": [], "news_leaders": [],
@@ -282,7 +286,7 @@ def scanner_engine():
                 continue
                 
             wait_count = 0
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10)
+            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
             
             extracted_stocks = []
             if not data_df.empty:
@@ -290,14 +294,14 @@ def scanner_engine():
                     try:
                         price, vol = 0.0, 0.0
                         if isinstance(data_df.columns, pd.MultiIndex):
-                            if 'Close' in data_df.columns.get_level_values(0) and sym in data_df['Close'].columns:
-                                price = float(data_df['Close'][sym].dropna().iloc[-1])
-                                vol = float(data_df['Volume'][sym].dropna().iloc[-1])
-                            elif sym in data_df.columns.get_level_values(0):
+                            if sym in data_df.columns.get_level_values(0):
                                 price = float(data_df[sym]['Close'].dropna().iloc[-1])
                                 vol = float(data_df[sym]['Volume'].dropna().iloc[-1])
+                            elif 'Close' in data_df.columns.get_level_values(0) and sym in data_df['Close'].columns:
+                                price = float(data_df['Close'][sym].dropna().iloc[-1])
+                                vol = float(data_df['Volume'][sym].dropna().iloc[-1])
                         else:
-                            if 'Close' in data_df.columns:
+                            if len(symbols_to_track) == 1 and 'Close' in data_df.columns:
                                 price = float(data_df['Close'].dropna().iloc[-1])
                                 vol = float(data_df['Volume'].dropna().iloc[-1])
                                 
@@ -342,7 +346,6 @@ def scanner_engine():
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
                 
-                # 🚨 致命修復：主動補齊所有可能缺失的欄位，防止舊記憶體造成 KeyError 閃退
                 cell = config.MASTER_BRAIN["details"].get(sym, {})
                 cell.setdefault("HOD", initial_hod)
                 cell.setdefault("NewsList", [])
@@ -480,7 +483,8 @@ def scanner_engine():
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
                     cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView 查看線圖", "score": 0, "link": tw_url, "time": ""}]
-                    threading.Thread(target=fetch_news_bg, args=(sym, cell), daemon=True).start()
+                    # 🌟 改用執行緒池來抓新聞，不再無限開新 Thread
+                    bg_task_pool.submit(fetch_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
                 cell["last_price"] = p_num
@@ -515,6 +519,5 @@ def scanner_engine():
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
-            # 加入列印詳細錯誤，避免未來再發生無聲閃退
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
             time.sleep(5)
