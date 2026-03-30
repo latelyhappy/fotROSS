@@ -5,13 +5,16 @@ import yfinance as yf
 import pandas as pd
 from playwright.sync_api import sync_playwright
 from io import StringIO 
-from concurrent.futures import ThreadPoolExecutor  # 🌟 新增：執行緒池，防止伺服器爆炸
+from concurrent.futures import ThreadPoolExecutor
 
 import config
 from news_engine import fetch_news_bg
 
-# 🌟 建立全域執行緒池：限制最多 10 個背景任務同時跑，保護 Railway 資源
+# 🌟 全域背景執行緒池
 bg_task_pool = ThreadPoolExecutor(max_workers=10)
+
+# 🌟 新增：Yahoo 資料庫紅綠燈，防止多執行緒同時寫入快取造成 "database is locked"
+yf_lock = threading.Lock()
 
 # 🛡️ Cloudscraper 破甲防護模組
 try:
@@ -44,12 +47,15 @@ def get_market_rank_type():
 
 def fetch_static_bg(ticker):
     try:
-        t = yf.Ticker(ticker)
-        i = t.info
-        f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
-        a = i.get('averageVolume', 500000)
-        prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
-        if prev == 0: prev = 1.0
+        # 🚦 拿號碼牌：只有拿到鎖的執行緒才可以呼叫 yfinance，防止資料庫鎖死
+        with yf_lock:
+            t = yf.Ticker(ticker)
+            i = t.info
+            f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
+            a = i.get('averageVolume', 500000)
+            prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
+            if prev == 0: prev = 1.0
+            
         config.stock_cache[ticker] = (f, a, prev)
     except:
         config.stock_cache[ticker] = (1000000, 500000, 1.0)
@@ -58,7 +64,6 @@ def get_static(ticker):
     if ticker in config.stock_cache: return config.stock_cache[ticker]
     else:
         config.stock_cache[ticker] = (1000000, 500000, 1.0) 
-        # 🌟 改用執行緒池，不再無限制瘋狂開 Thread
         bg_task_pool.submit(fetch_static_bg, ticker)
         return (1000000, 500000, 1.0)
 
@@ -254,9 +259,8 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V10.4 (終極資源管控防崩潰版)...")
+    print("🔥 啟動 V10.5 (資料庫鎖定防禦消音版)...")
     
-    # 確保 Webull 也在背景執行緒獨立運作
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
     wait_count = 0
@@ -286,7 +290,10 @@ def scanner_engine():
                 continue
                 
             wait_count = 0
-            data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
+            
+            # 🚦 同樣對主線程的高頻下載套用資料庫鎖，確保最深層的保護
+            with yf_lock:
+                data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
             
             extracted_stocks = []
             if not data_df.empty:
@@ -483,7 +490,6 @@ def scanner_engine():
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
                     cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView 查看線圖", "score": 0, "link": tw_url, "time": ""}]
-                    # 🌟 改用執行緒池來抓新聞，不再無限開新 Thread
                     bg_task_pool.submit(fetch_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
@@ -519,5 +525,7 @@ def scanner_engine():
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
+            # 只有遇到非 Yahoo 內部的嚴重錯誤才印出
+            if "database is locked" not in str(e) and "NoneType" not in str(e):
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
             time.sleep(5)
