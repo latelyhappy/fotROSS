@@ -2,14 +2,13 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V13 - 混血先鋒極速版</title>
+    <title>ROSS Sniper V16 - 視覺覺醒版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
         .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
         .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
-        /* 這裡控制了下捲式表格 */
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; bottom: 0; right: 0; cursor: se-resize; }
         
@@ -77,8 +76,8 @@
         let activeSymbol = "";
         let refreshTimeout;
 
-        function saveLayout() { /* ... 同前 ... */ }
-        function loadLayout() { /* ... 同前 ... */ }
+        function saveLayout() { /* 佈局保存功能保持不變 */ }
+        function loadLayout() { /* 佈局載入功能保持不變 */ }
 
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
@@ -88,14 +87,13 @@
             isEngineRunning = !isEngineRunning; 
             const btn = document.getElementById('engine-btn'); 
             const statusEl = document.getElementById('sys-status');
-            
             if(isEngineRunning) { 
                 btn.innerText = "⏹️ 停止掃描"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9"; 
                 statusEl.innerHTML = '🔄 掃描引擎連線中...'; 
                 refresh(); 
             } else { 
                 btn.innerText = "▶️ 恢復掃描"; btn.style.background = "#3fb950"; btn.style.color="white"; 
-                statusEl.innerHTML = '⏸️ 系統已暫停更新 (伺服器準備休眠)'; 
+                statusEl.innerHTML = '⏸️ 系統已暫停更新'; 
                 clearTimeout(refreshTimeout); 
             }
         }
@@ -122,7 +120,6 @@
                 cols.forEach(c => {
                     let val = row[c.k] || '';
                     if (c.k === 'Code') {
-                        // 📰 在這裡判斷：如果後端傳來 HasCatalyst = true，就加上新聞圖標
                         let newsIcon = row.HasCatalyst ? ' <span title="有重大新聞催化劑" style="font-size:11px;">📰</span>' : '';
                         val = `<span class="sym" ondblclick="openTW('${val}', event)" title="雙擊開啟 TradingView">${val}</span>${newsIcon}`;
                     }
@@ -130,9 +127,18 @@
                         if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
                         else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
                     }
+                    if (c.k === 'FloatStr') {
+                        let fNum = parseFloat(row.FloatNum || 99999999);
+                        if (fNum < 2000000) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`; // 微型流通股 紫色
+                        else if (fNum < 10000000) val = `<span style="color:#58a6ff;">${val}</span>`; // 低流通 藍色
+                    }
+                    if (c.k === 'RVOL') {
+                        let rNum = parseFloat(row.RvolNum || 0);
+                        if (rNum >= 10.0) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`; // 異常爆量 火焰
+                    }
                     if (c.k === 'Streak') {
-                        if (val.includes('極速') || val.includes('精準')) val = `<span style="color:#e34c26; font-weight:900;">${val}</span>`;
-                        else if (val.includes('回調')) val = `<span style="color:#58a6ff;">${val}</span>`;
+                        if (val.includes('極速') || val.includes('回踩') || val.includes('精準')) val = `<span style="color:#e34c26; font-weight:900;">${val}</span>`;
+                        else if (val.includes('準備')) val = `<span style="color:#e3b341; font-weight:bold;">${val}</span>`;
                     }
                     html += `<td>${val}</td>`;
                 });
@@ -144,6 +150,23 @@
             container.scrollTop = oldScrollTop;
         }
 
+        // 共用的行動指標背景渲染函數 (黃金10分鐘 + 訊號色)
+        function getActionRowStyle(row) {
+            if (row.HasFreshNews) {
+                // 黃金 10 分鐘新聞：暗黃金色漸層底色
+                return 'style="background: linear-gradient(90deg, rgba(210,153,34,0.3) 0%, rgba(210,153,34,0.05) 100%); border-left: 3px solid gold;"';
+            }
+            if (row.Streak) {
+                if (row.Streak.includes('極速') || row.Streak.includes('回踩') || row.Streak.includes('精準')) {
+                    return 'style="background:rgba(156, 39, 176, 0.2); border-left: 3px solid #d2a8ff;"';
+                }
+                if (row.Streak.includes('爆量') || row.Streak.includes('準備突破')) {
+                    return 'style="background:rgba(210,153,34,0.1); border-left: 3px solid #d29922;"';
+                }
+            }
+            return '';
+        }
+
         function renderHOD(data) {
             if(isHodPaused) return; 
             renderTable('hod-list', data, [
@@ -151,15 +174,12 @@
                 {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
                 {n:'漲跌%', k:'Change', w:'12%'}, {n:'訊號', k:'Streak', w:'18%'},
                 {n:'總量', k:'Volume', w:'14%'}, {n:'浮動股', k:'FloatStr', w:'10%'}
-            ], (row) => row.Streak.includes('虛漲') ? 'style="background:rgba(210,153,34,0.1);"' : '');
+            ], getActionRowStyle);
         }
-
-        let lastSuccessfulFetchTime = Date.now();
 
         function scheduleNextRefresh() {
             if(!isEngineRunning) return; 
-            const randomDelay = Math.floor(Math.random() * 6000) + 5000; 
-            refreshTimeout = setTimeout(refresh, randomDelay);
+            refreshTimeout = setTimeout(refresh, 3000); // 鎖定 3 秒極限更新
         }
 
         function refresh() {
@@ -169,8 +189,7 @@
             fetch('/data?t=' + ts)
                 .then(r => r.json())
                 .then(d => {
-                    lastSuccessfulFetchTime = Date.now();
-                    document.getElementById('sys-status').innerHTML = `🟢 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
+                    document.getElementById('sys-status').innerHTML = `🟢 V16 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
                     document.getElementById('sys-status').style.backgroundColor = 'rgba(13, 17, 23, 0.8)';
                     document.getElementById('sys-status').style.color = '#3fb950';
 
@@ -193,19 +212,12 @@
                     lastKnownHodData = d.hod;
                     renderHOD(d.hod);
 
-                    // 🎨 動能背景顏色套用區
                     renderTable('surge-list', d.surge, [
                         {n:'時間', k:'Time', w:'10%'}, {n:'代碼', k:'Code', w:'12%'},
                         {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
                         {n:'漲跌%', k:'Change', w:'12%'}, {n:'🎯訊號', k:'Streak', w:'28%'},
                         {n:'淨買量', k:'NetVolStr', w:'14%'}
-                    ], (row) => {
-                        // 如果包含 極速 或 精準，整行套用紫色底與邊框
-                        if (row.Streak.includes('極速') || row.Streak.includes('精準')) return 'style="background:rgba(156, 39, 176, 0.2); border-left: 3px solid #d2a8ff;"';
-                        // 如果包含 爆量，整行套用金色底
-                        if (row.Streak.includes('爆量')) return 'style="background:rgba(210,153,34,0.1);"';
-                        return '';
-                    });
+                    ], getActionRowStyle);
 
                     renderTable('news-score-list', d.news_leaders, [
                         {n:'代碼', k:'Code', w:'15%'}, {n:'分數', k:'NewsScore', w:'15%'},
