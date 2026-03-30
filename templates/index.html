@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V11.1 - 極淨斷電版</title>
+    <title>ROSS Sniper V12 - 微牛即時新聞直連版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
@@ -77,8 +77,6 @@
         let lastKnownHodData = [];
         let brainDetailsCache = {};
         let activeSymbol = "";
-
-        // 宣告全域計時器，讓我們可以隨時拔掉它的插頭！
         let refreshTimeout;
 
         function saveLayout() {
@@ -113,7 +111,6 @@
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
         
-        // 🎯 強制斷電閘刀
         function toggleEngineRun() {
             isEngineRunning = !isEngineRunning; 
             const btn = document.getElementById('engine-btn'); 
@@ -124,13 +121,13 @@
                 btn.style.background = "#21262d"; 
                 btn.style.color="#c9d1d9"; 
                 statusEl.innerHTML = '🔄 掃描引擎連線中...'; 
-                refresh(); // 重新啟動輪詢
+                refresh(); 
             } else { 
                 btn.innerText = "▶️ 恢復掃描"; 
                 btn.style.background = "#3fb950"; 
                 btn.style.color="white"; 
                 statusEl.innerHTML = '⏸️ 系統已暫停更新 (伺服器準備休眠)'; 
-                clearTimeout(refreshTimeout); // 🔌 徹底拔除所有排程
+                clearTimeout(refreshTimeout); 
             }
         }
 
@@ -232,15 +229,14 @@
 
         let lastSuccessfulFetchTime = Date.now();
 
-        // 🎯 隨機排程引擎：抽出 5000 到 11000 毫秒之間的數字
         function scheduleNextRefresh() {
-            if(!isEngineRunning) return; // 雙重保險：確保暫停時絕對不會排程
+            if(!isEngineRunning) return; 
             const randomDelay = Math.floor(Math.random() * 6000) + 5000; 
             refreshTimeout = setTimeout(refresh, randomDelay);
         }
 
         function refresh() {
-            if(!isEngineRunning) return; // 雙重保險：就算排程進來了，如果被關閉也強制退出
+            if(!isEngineRunning) return; 
             
             const ts = new Date().getTime();
             fetch('/data?t=' + ts)
@@ -303,39 +299,44 @@
                     if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
                     saveLayout();
                     
-                    // 🎯 成功後排程下一次
                     scheduleNextRefresh();
                 })
                 .catch(err => {
                     console.error(err);
-                    // 🎯 失敗後排程下一次，確保不斷線
                     scheduleNextRefresh();
                 });
         }
 
+        // 🎯 強化版戰情板載入：字體 15px、當天日期橘色高亮
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
             let newsHTML = '<div style="margin-top:10px; font-weight:bold; border-bottom:1px solid #30363d; padding-bottom:3px; margin-bottom:5px;">即時新聞與催化劑</div>';
+            
             if (d.NewsList && d.NewsList.length > 0) {
                 d.NewsList.forEach(n => {
-                    if (n.title !== '檢索中...') {
+                    if (!n.title.includes('檢索中') && !n.title.includes('點擊前往')) {
                         let titleColor = n.is_read ? '#484f58' : '#e6edf3';
-                        let timeStr = n.time ? `<span style="color:#8b949e; font-size:9px; margin-right:5px;">[${n.time}]</span>` : '';
-                        newsHTML += `<div style="margin-bottom:6px; line-height:1.3;">${timeStr}<a href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor};">${n.title}</a></div>`;
+                        // 判斷是否為今日新聞，切換顏色
+                        let timeStyle = n.is_today ? 'color:#ffa500; font-weight:bold;' : 'color:#8b949e;';
+                        let timeStr = n.time ? `<span style="${timeStyle} font-size:12px; margin-right:5px;">[${n.time}]</span>` : '';
+                        
+                        // 字體強制設定為 15px
+                        newsHTML += `<div style="margin-bottom:8px; line-height:1.4;">${timeStr}<a href="javascript:void(0)" onclick="markRead('${n.id}', '${n.link}')" class="news-title-link" style="color:${titleColor}; font-size:15px; font-weight:500;">${n.title}</a></div>`;
+                    } else {
+                        // 系統提示文字
+                        newsHTML += `<div style="margin-bottom:6px;"><a href="${n.link}" target="_blank" style="color:#8b949e; font-size:12px; text-decoration:none;">${n.title}</a></div>`;
                     }
                 });
-            } else { newsHTML += '<div style="color:#8b949e; font-size:10px;">今日無重大公關新聞</div>'; }
+            } else { newsHTML += '<div style="color:#8b949e; font-size:11px;">近 4 天無重大公關新聞</div>'; }
             
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        // 啟動時讀取排版，並觸發第一次更新
         window.onload = () => {
             loadLayout();
             refresh();
         };
 
-        // 這個監聽器只用來抓斷線問題，絕對不負責送出 /data 請求
         setInterval(() => {
             const statusEl = document.getElementById('sys-status');
             if (isEngineRunning && (Date.now() - lastSuccessfulFetchTime > 20000)) {
