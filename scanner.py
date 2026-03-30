@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 雙軌執行緒池：Yahoo 股價與新聞獨立通道
+# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -42,34 +42,25 @@ CATALYST_KEYWORDS = [
 ]
 
 # ==========================================
-# 🌐 Google 輕量級神經網路翻譯引擎
+# 🌐 Google 翻譯引擎
 # ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
-        params = {
-            "client": "gtx",
-            "sl": "en",
-            "tl": "zh-TW",
-            "dt": "t",
-            "q": text
-        }
+        params = {"client": "gtx", "sl": "en", "tl": "zh-TW", "dt": "t", "q": text}
         res = requests.get(url, params=params, timeout=5)
         if res.status_code == 200:
             translated_text = "".join([sentence[0] for sentence in res.json()[0]])
             return translated_text
-    except Exception as e:
-        pass
+    except Exception as e: pass
     return text 
 
 # ==========================================
-# 📰 華爾街直連公關專線 (含智能增量更新快取機制)
+# 📰 華爾街直連公關專線
 # ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
-        # 建立大腦記憶區塊，用來記住已經翻譯過的新聞標題
-        if "raw_news_titles" not in cell:
-            cell["raw_news_titles"] = set()
+        if "raw_news_titles" not in cell: cell["raw_news_titles"] = set()
             
         tz_ny = pytz.timezone('America/New_York')
         now_ny = datetime.now(tz_ny)
@@ -88,69 +79,44 @@ def fetch_direct_news_bg(ticker, cell):
             links = links[1:]
             
         new_articles = []
-        
         for i in range(min(len(titles), len(dates))):
             raw_title = titles[i].replace("<![CDATA[", "").replace("]]>", "").strip()
             raw_link = links[i] if i < len(links) else f"https://finance.yahoo.com/quote/{ticker}/news"
             pub_date_str = dates[i].strip()
             
             if not raw_title: continue
-            
-            # 🚨 智能快取機制：這篇新聞已經在大腦記憶區了？直接跳過！不浪費資源翻譯！
-            if raw_title in cell["raw_news_titles"]:
-                continue
+            if raw_title in cell["raw_news_titles"]: continue
                 
             try:
                 clean_str = pub_date_str[:-6].strip() 
                 pub_dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
-                
                 pub_date_only = pub_dt.strftime("%Y-%m-%d")
                 pub_time_only = pub_dt.strftime("%H:%M")
                 days_diff = (now_ny.date() - pub_dt.date()).days
             except Exception as e:
-                days_diff = 0
-                pub_date_only = ""
-                pub_time_only = ""
+                days_diff, pub_date_only, pub_time_only = 0, "", ""
                 
-            if days_diff > 4: 
-                break # 超過 4 天直接煞車
+            if days_diff > 4: break 
                 
             is_today = (pub_date_only == today_str)
             display_str = f"{pub_time_only}" if is_today else f"{pub_date_only[5:]} {pub_time_only}"
-            
-            log_debug(ticker, f"✨ 發現新公關稿！啟動翻譯: {pub_date_only} {pub_time_only} | {raw_title[:20]}...")
             translated_title = translate_to_zh(raw_title)
-            
-            # 將原文標題存入大腦記憶區，下次就不會再翻譯了
             cell["raw_news_titles"].add(raw_title)
             
             new_articles.append({
-                "id": str(random.randint(10000, 99999)),
-                "title": translated_title,
-                "score": 0,
-                "link": raw_link,
-                "time": display_str,
-                "is_today": is_today,
-                "is_read": False
+                "id": str(random.randint(10000, 99999)), "title": translated_title,
+                "score": 0, "link": raw_link, "time": display_str, "is_today": is_today, "is_read": False
             })
-            
-            # 如果是第一次抓，最多抓 5 篇；如果是後續的增量更新，抓到新的為止
             if len(new_articles) >= 5: break
             
-        # 如果有抓到「新」的新聞，就把它們插隊放到舊新聞的最前面
         if new_articles:
-            # 清除系統產生的過渡文字
             clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
-            # 新新聞放前面，舊新聞放後面，總共保留 5 則
             cell["NewsList"] = (new_articles + clean_old_list)[:5]
-            log_debug(ticker, f"🎉 成功新增並翻譯 {len(new_articles)} 筆突發新聞！")
         elif not cell.get("NewsList") or "🗞️" in cell["NewsList"][0].get("title", ""):
-            # 如果原本就是空的，而且這次也沒抓到，才顯示無新聞
             tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
             cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (近4天無新聞)", "score": 0, "link": tw_url, "time": "", "is_today": False}]
             
     except Exception as e:
-        log_debug(ticker, f"❌ 致命錯誤閃退: {e}")
         tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
         cell["NewsList"] = [{"id": "0", "title": f"🗞️ 新聞直連失敗，點此看線圖", "score": 0, "link": tw_url, "time": "", "is_today": False}]
 
@@ -171,7 +137,6 @@ def fetch_static_bg(ticker):
             a = i.get('averageVolume', 500000)
             prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
             if prev == 0: prev = 1.0
-            
         config.stock_cache[ticker] = (f, a, prev)
     except:
         config.stock_cache[ticker] = (1000000, 500000, 1.0)
@@ -214,7 +179,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ Webull 飆股主引擎
+# ★ 純血 Webull 飆股主引擎 (捨棄一切備案)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -223,26 +188,26 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...", flush=True)
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜掃描 ({market_status})...", flush=True)
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
+                context = browser.new_context(user_agent="Mozilla/5.0")
                 page = context.new_page()
                 page.goto("https://app.webull.com/screener", timeout=30000)
-                time.sleep(4) 
+                time.sleep(3) 
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
-                min_vol = "5000" if rank_type == "2" else "50000"
                 
+                # 極早鳥零交易量限制
                 js_code = f"""
                 async () => {{
                     const payload = {{
                         "fetch": 30,
                         "rules": [
-                            {{"proId": "fm_13", "rule": "between", "val": ["1", "20"]}},       
-                            {{"proId": "fm_43", "rule": "between", "val": ["0", "20000000"]}}, 
-                            {{"proId": "fm_14", "rule": "between", "val": ["{min_vol}", "999999999"]}}
+                            {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}},       
+                            {{"proId": "fm_43", "rule": "between", "val": ["0", "99999999"]}}, 
+                            {{"proId": "fm_14", "rule": "between", "val": ["0", "999999999"]}}
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -286,14 +251,10 @@ def fetch_webull_gainers():
                         rvol_val = (vol_float / 50000.0) if avg_vol == 500000 else (vol_float / avg_vol)
                         
                         new_entry = {
-                            "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
-                            "Code": sym,
+                            "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
                             "Price": f"${float(price_raw):.2f}" if float(price_raw) > 0 else "獲取中",
-                            "ChangeAmt": chg_amt_str,
-                            "Change": chg_str,
-                            "Volume": format_vol_km(vol_float),
-                            "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
-                            "FloatStr": float_str,
+                            "ChangeAmt": chg_amt_str, "Change": chg_str, "Volume": format_vol_km(vol_float),
+                            "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x", "FloatStr": float_str,
                             "discovery_time": time.time()
                         }
                         update_or_add_gapper(new_entry)
@@ -302,80 +263,24 @@ def fetch_webull_gainers():
                     feed_gappers = feed_gappers[:1000]
                     auto_hot_symbols = auto_hot_symbols[:200] 
                 elif not data.get('data', []):
-                    raise ValueError("深夜靜音模式切換")
+                    raise ValueError("API回傳空名單")
                     
         except Exception as e:
-            if "深夜靜音模式切換" not in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗，切換備用雷達...", flush=True)
-                
-            try:
-                rank_type, _ = get_market_rank_type()
-                if rank_type == "2": url = "https://stockanalysis.com/markets/premarket/"
-                elif rank_type == "1": url = "https://stockanalysis.com/markets/after-hours/"
-                else: url = "https://stockanalysis.com/markets/gainers/"
-                
-                res = scraper.get(url, timeout=15)
-                df_list = pd.read_html(StringIO(res.text))
-                
-                if df_list:
-                    df = df_list[0]
-                    price_col = next((c for c in df.columns if 'price' in c.lower() or 'last' in c.lower()), None)
-                    change_col = next((c for c in df.columns if '%' in c or 'change' in c.lower()), None)
-                    change_amt_col = next((c for c in df.columns if 'change' in c.lower() and '%' not in c), None)
-                    vol_col = next((c for c in df.columns if 'vol' in c.lower()), None)
-                    
-                    new_found = []
-                    for idx, row in df.iloc[::-1].iterrows():
-                        if idx > 29: continue
-                        sym = str(row.get('Symbol', ''))
-                        if sym and '-' not in sym:
-                            if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
-                            new_found.append(sym)
-                            
-                            f, avg_vol, prev_close = get_static(sym)
-                            float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                            
-                            p_val = str(row[price_col]).replace('$', '') if price_col and pd.notna(row[price_col]) else '0'
-                            c_val = str(row[change_col]) if change_col and pd.notna(row[change_col]) else '0%'
-                            c_amt_val = str(row[change_amt_col]).replace('+', '').replace('$', '') if change_amt_col and pd.notna(row[change_amt_col]) else '0'
-                            
-                            v_float = parse_vol_to_float(row[vol_col]) if vol_col and pd.notna(row[vol_col]) else 0.0
-                            
-                            try: c_amt_float = float(c_amt_val)
-                            except: c_amt_float = 0.0
-                            chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
-                            
-                            rvol_val = (v_float / 50000.0) if avg_vol == 500000 else (v_float / avg_vol)
-                            
-                            new_entry = {
-                                "Time": datetime.now(tz_tw).strftime('%H:%M:%S'),
-                                "Code": sym,
-                                "Price": f"${p_val}" if not p_val.startswith('$') else p_val,
-                                "ChangeAmt": chg_amt_str,
-                                "Change": c_val if '%' in c_val else f"{c_val}%",
-                                "Volume": format_vol_km(v_float),
-                                "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
-                                "FloatStr": float_str,
-                                "discovery_time": time.time()
-                            }
-                            update_or_add_gapper(new_entry)
-                            
-                    if new_found:
-                        feed_gappers = feed_gappers[:1000]
-                        auto_hot_symbols = auto_hot_symbols[:200]
-            except Exception as ex:
-                pass
+            if "API回傳空名單" in str(e):
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前無符合條件之股票，持續監控中...", flush=True)
+            else:
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 掃描異常: {e}", flush=True)
                 
         time.sleep(random.randint(4, 12))
 
 # ==========================================
-# ★ 副引擎
+# ★ 主控引擎
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.8 (增量輪詢與快取效能版)...", flush=True)
+    print("🔥 啟動 V12.10 (純血微牛專注版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -394,7 +299,7 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 無足夠交易量，雷達待命中...", flush=True)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 暫無股票訊號，雷達待命中...", flush=True)
                 wait_count += 1
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
@@ -447,22 +352,16 @@ def scanner_engine():
                 
                 change_pct = ((p_num - prev_close) / prev_close * 100) if prev_close > 0 else 0
                 change_str = f"+{change_pct:.2f}%" if change_pct > 0 else f"{change_pct:.2f}%"
-                
                 chg_amt = p_num - prev_close
                 chg_amt_str = f"+${chg_amt:.2f}" if chg_amt > 0 else f"-${abs(chg_amt):.2f}"
                 
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
-                        if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']:
-                            gap_entry['Price'] = f"${p_num:.2f}"
-                        if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0":
-                            gap_entry['Volume'] = format_vol_km(vol_raw)
-                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x":
-                            gap_entry['RVOL'] = f"{rvol:.1f}x"
-                        if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0":
-                            gap_entry['Change'] = change_str
-                        if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'):
-                            gap_entry['ChangeAmt'] = chg_amt_str
+                        if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']: gap_entry['Price'] = f"${p_num:.2f}"
+                        if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0": gap_entry['Volume'] = format_vol_km(vol_raw)
+                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x": gap_entry['RVOL'] = f"{rvol:.1f}x"
+                        if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0": gap_entry['Change'] = change_str
+                        if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'): gap_entry['ChangeAmt'] = chg_amt_str
                         gap_entry['FloatStr'] = float_str
                 
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
@@ -487,7 +386,6 @@ def scanner_engine():
                 cell.setdefault("pos_vol_streak", 0)
                 cell.setdefault("neg_vol_streak", 0)
                 cell.setdefault("GrindCount", 0)
-                cell.setdefault("last_vol_delta", 0)
                 
                 is_hod_break = False
                 if p_num > cell["HOD"]: 
@@ -513,12 +411,7 @@ def scanner_engine():
 
                 if cell["GrindCount"] >= 3 and cell["pos_vol_streak"] >= 3 and vol_raw < 500000:
                     cell["is_grinder"] = True
-                    active_grinders.append({
-                        "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
-                        "Streak": f"🔥無量緩推(連{cell['pos_vol_streak']}分)",
-                        "ChangeAmt": chg_amt_str, "Change": change_str,
-                        "GrindCount": cell["GrindCount"]
-                    })
+                    active_grinders.append({"Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}", "Streak": f"🔥無量緩推(連{cell['pos_vol_streak']}分)", "ChangeAmt": chg_amt_str, "Change": change_str, "GrindCount": cell["GrindCount"]})
                 elif cell["GrindCount"] <= -2:
                     cell["is_grinder"] = False
 
@@ -531,36 +424,22 @@ def scanner_engine():
                 
                 if p_num > recent_high:
                     if is_pullback:
-                        pb_low = cell["pullback_low"]
-                        if p_num > pb_low * 1.01: 
-                            sniper_triggered = True
-                            sniper_label = "🎯精準回調"
+                        if p_num > cell["pullback_low"] * 1.01: sniper_triggered = True; sniper_label = "🎯精準回調"
                         is_pullback = False
                         surge_start_price = p_num
                         max_surge_vol = curr_vol_delta
-                    else:
-                        max_surge_vol = max(max_surge_vol, curr_vol_delta)
+                    else: max_surge_vol = max(max_surge_vol, curr_vol_delta)
                     recent_high = p_num
-                    
                     if is_hod_break:
-                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0:
-                            sniper_triggered = True
-                            sniper_label = "⚠️爆量(短線留意)"
-                        elif curr_vol_delta > 0 and curr_vol_delta < 5000:
-                            sniper_triggered = True
-                            sniper_label = "⚠️虛漲(無量誘多)"
-                            
+                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0: sniper_triggered = True; sniper_label = "⚠️爆量(短線留意)"
+                        elif curr_vol_delta > 0 and curr_vol_delta < 5000: sniper_triggered = True; sniper_label = "⚠️虛漲(無量誘多)"
                 elif p_num < last_price:
                     swing_size = recent_high - surge_start_price
                     retrace_ratio = (recent_high - p_num) / swing_size if swing_size > 0 else 0
                     if retrace_ratio <= 0.50:
-                        if not is_pullback:
-                            is_pullback = True
-                            cell["pullback_low"] = p_num
-                        else:
-                            cell["pullback_low"] = min(cell["pullback_low"], p_num)
-                    else:
-                        is_pullback = False 
+                        if not is_pullback: is_pullback = True; cell["pullback_low"] = p_num
+                        else: cell["pullback_low"] = min(cell["pullback_low"], p_num)
+                    else: is_pullback = False 
 
                 cell["recent_high"] = recent_high
                 cell["surge_start_price"] = surge_start_price
@@ -570,19 +449,13 @@ def scanner_engine():
                 if sniper_triggered: cell["sniper_label"] = sniper_label
                 
                 streak_text = f"x{cell['streak']}"
-                if is_hod_break: 
-                    if sniper_triggered: streak_text = f"⭐破高+{cell['sniper_label']}"
-                    else: streak_text = f"⭐破高{streak_text}"
-                elif sniper_triggered: 
-                    streak_text = f"{cell['sniper_label']}"
+                if is_hod_break: streak_text = f"⭐破高+{cell['sniper_label']}" if sniper_triggered else f"⭐破高{streak_text}"
+                elif sniper_triggered: streak_text = f"{cell['sniper_label']}"
 
                 has_catalyst = False
                 for news in cell["NewsList"]:
                     for kw in CATALYST_KEYWORDS:
-                        if kw in news.get("title", "").upper():
-                            has_catalyst = True
-                            cell["max_news_score"] += 10 
-                            break
+                        if kw in news.get("title", "").upper(): has_catalyst = True; cell["max_news_score"] += 10; break
                 
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
@@ -596,17 +469,12 @@ def scanner_engine():
 
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
-                
                 if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > 10000):
-                    if not sniper_triggered: 
-                        item["Streak"] = "⚡極速(9EMA)"
+                    if not sniper_triggered: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
-                # 🚨 智能輪詢系統：不管是第一次抓，還是每 30 圈 (約 5 分鐘) 的定期巡邏，都派直升機去檢查！
                 if count % 30 == 0 or not cell["NewsList"]: 
-                    if not cell["NewsList"]:
-                        tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
-                        cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在直連華爾街公關專線擷取新聞...", "score": 0, "link": tw_url, "time": "", "is_today": False}]
+                    if not cell["NewsList"]: cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在直連華爾街公關專線擷取新聞...", "score": 0, "link": f"https://www.tradingview.com/chart/?symbol={sym}", "time": "", "is_today": False}]
                     news_task_pool.submit(fetch_direct_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
@@ -642,6 +510,5 @@ def scanner_engine():
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
-            if "database is locked" not in str(e) and "NoneType" not in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}", flush=True)
+            if "database is locked" not in str(e) and "NoneType" not in str(e): print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}", flush=True)
             time.sleep(5)
