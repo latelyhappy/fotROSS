@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -40,9 +39,6 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
-# ==========================================
-# 🌐 Google 神經網路翻譯引擎
-# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -54,9 +50,6 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
-# ==========================================
-# 📰 終極新聞管線 (yfinance 原生無快取 API)
-# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = []
@@ -171,7 +164,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ V15 全新刺客引擎 (TradingView API 直連)
+# ★ V15.2 刺客引擎 (精準剔除 OTC 垃圾股)
 # ==========================================
 def fetch_tv_gainers():
     global auto_hot_symbols, feed_gappers
@@ -182,7 +175,6 @@ def fetch_tv_gainers():
             rank_type, market_status = get_market_rank_type()
             print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ TradingView API 掃描 ({market_status})...", flush=True)
             
-            # 🚀 TV 的原生 JSON API，極致輕量、無須開瀏覽器！
             sort_field = "premarket_change" if rank_type == "2" else "change"
             
             payload = {
@@ -202,7 +194,6 @@ def fetch_tv_gainers():
                 data = res.json()
                 new_found = []
                 
-                # 反向迭代以保持最新在最前面
                 for item in reversed(data.get("data", [])):
                     cols = item.get("d", [])
                     if not cols or len(cols) < 7: continue
@@ -210,14 +201,16 @@ def fetch_tv_gainers():
                     sym_raw = str(cols[0])
                     sym = sym_raw.split(':')[-1] if ':' in sym_raw else sym_raw
                     
-                    if '-' in sym: continue
+                    # 🚨 終極物理過濾：只要代碼超過 4 個字 (粉紅單)，或包含破折號，直接踢掉！
+                    if '-' in sym or len(sym) > 4: 
+                        continue
+                        
                     if sym not in auto_hot_symbols: auto_hot_symbols.insert(0, sym)
                     new_found.append(sym)
                     
                     f, avg_vol, prev_close = get_static(sym)
                     float_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                     
-                    # 判斷盤前還是盤中資料
                     if rank_type == "2":
                         p_val_float = float(cols[4]) if cols[4] is not None else float(cols[1])
                         c_val_float = float(cols[5]) if cols[5] is not None else float(cols[2])
@@ -228,10 +221,10 @@ def fetch_tv_gainers():
                         v_float = float(cols[3]) if cols[3] is not None else 0.0
                     
                     c_amt_float = p_val_float - prev_close if prev_close > 0 else 0.0
-                    
                     chg_str = f"+{c_val_float:.2f}%" if c_val_float > 0 else f"{c_val_float:.2f}%"
                     chg_amt_str = f"+${c_amt_float:.2f}" if c_amt_float > 0 else f"-${abs(c_amt_float):.2f}"
-                    rvol_val = (v_float / 50000.0) if avg_vol == 500000 else (v_float / avg_vol)
+                    
+                    rvol_val = (v_float / avg_vol) if avg_vol > 0 else 0.0
                     
                     new_entry = {
                         "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
@@ -260,9 +253,8 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V15 終極刺客版 (TradingView API 直連)...", flush=True)
+    print("🔥 啟動 V15.2 終極刺客版 (長度過濾徹底消滅粉紅單)...", flush=True)
     
-    # 啟動輕量化的 TV API 引擎
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     wait_count = 0
@@ -358,7 +350,8 @@ def scanner_engine():
                     if gap_entry['Code'] == sym:
                         if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']: gap_entry['Price'] = f"${p_num:.2f}"
                         if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0": gap_entry['Volume'] = format_vol_km(vol_raw)
-                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x": gap_entry['RVOL'] = f"{rvol:.1f}x"
+                        rvol_calc = (vol_raw / a) if a > 0 else 0.0
+                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x": gap_entry['RVOL'] = f"{rvol_calc:.1f}x"
                         if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0": gap_entry['Change'] = change_str
                         if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'): gap_entry['ChangeAmt'] = chg_amt_str
                         gap_entry['FloatStr'] = float_str
@@ -485,7 +478,7 @@ def scanner_engine():
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "ChangeAmt": chg_amt_str, "Change": change_str, 
                     "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
-                    "RVOL": f"{rvol:.1f}x", "FloatStr": float_str, "Streak": streak_text,
+                    "RVOL": f"{rvol_calc:.1f}x" if 'rvol_calc' in locals() and rvol_calc > 0 else "0.0x", "FloatStr": float_str, "Streak": streak_text,
                     "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
                     "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"])
@@ -504,7 +497,7 @@ def scanner_engine():
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
                 cell["last_price"] = p_num
-                cell["RVOL"] = f"{rvol:.1f}x"
+                cell["RVOL"] = item["RVOL"]
                 cell["FloatStr"] = float_str
                 
                 config.MASTER_BRAIN["details"][sym] = cell
