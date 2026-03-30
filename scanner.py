@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 雙軌執行緒池
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -41,9 +40,6 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
-# ==========================================
-# 🌐 Google 翻譯引擎
-# ==========================================
 def translate_to_zh(text):
     try:
         url = "https://translate.googleapis.com/translate_a/single"
@@ -55,9 +51,6 @@ def translate_to_zh(text):
     except Exception as e: pass
     return text 
 
-# ==========================================
-# 📰 華爾街直連公關專線
-# ==========================================
 def fetch_direct_news_bg(ticker, cell):
     try:
         if "raw_news_titles" not in cell: cell["raw_news_titles"] = set()
@@ -179,7 +172,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ 純血 Webull 飆股主引擎 (捨棄一切備案)
+# ★ 純血 Webull 飆股主引擎 (極早鳥拔除封印版)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -188,7 +181,7 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜掃描 ({market_status})...", flush=True)
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 篩選中 ({market_status})...", flush=True)
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -199,15 +192,14 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # 極早鳥零交易量限制
+                # 🚨 終極改版：完全拔除 Volume 與 Float 的下限，防止微牛 API 判斷錯誤而當機回傳空名單！
+                # 只保留最核心的「股價區間 0.5 ~ 50」，剩下全抓！
                 js_code = f"""
                 async () => {{
                     const payload = {{
                         "fetch": 30,
                         "rules": [
-                            {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}},       
-                            {{"proId": "fm_43", "rule": "between", "val": ["0", "99999999"]}}, 
-                            {{"proId": "fm_14", "rule": "between", "val": ["0", "999999999"]}}
+                            {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}}
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -267,7 +259,7 @@ def fetch_webull_gainers():
                     
         except Exception as e:
             if "API回傳空名單" in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前無符合條件之股票，持續監控中...", flush=True)
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前連一檔股票都擠不出來，持續監控中...", flush=True)
             else:
                 print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 掃描異常: {e}", flush=True)
                 
@@ -280,7 +272,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.10 (純血微牛專注版)...", flush=True)
+    print("🔥 啟動 V12.11 (微牛封印徹底拔除版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -299,7 +291,7 @@ def scanner_engine():
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
-                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ 暫無股票訊號，雷達待命中...", flush=True)
+                if wait_count % 5 == 0: print(f"[{current_time_tw}] ⏳ [極早鳥] 暫無微牛榜單資料，雷達待命中...", flush=True)
                 wait_count += 1
                 config.MASTER_BRAIN.update({
                     "gappers": feed_gappers, "hod": feed_hod, "surge": feed_surge,
