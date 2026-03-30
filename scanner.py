@@ -172,7 +172,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ 純血 Webull 飆股主引擎 (極早鳥拔除封印版)
+# ★ 純血 Webull 飆股主引擎 (100股誘捕解鎖版)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -181,7 +181,7 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 篩選中 ({market_status})...", flush=True)
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...", flush=True)
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
@@ -192,14 +192,15 @@ def fetch_webull_gainers():
                 
                 sort_id = "fm_53" if rank_type == "2" else "fm_12"
                 
-                # 🚨 終極改版：完全拔除 Volume 與 Float 的下限，防止微牛 API 判斷錯誤而當機回傳空名單！
-                # 只保留最核心的「股價區間 0.5 ~ 50」，剩下全抓！
+                # 🚨 100股精準誘捕：用最低限度的 100 股與市值限制，滿足微牛運算邏輯，破解空名單魔咒！
                 js_code = f"""
                 async () => {{
                     const payload = {{
                         "fetch": 30,
                         "rules": [
-                            {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}}
+                            {{"proId": "fm_13", "rule": "between", "val": ["0.5", "50"]}},
+                            {{"proId": "fm_43", "rule": "between", "val": ["0", "999999999"]}},
+                            {{"proId": "fm_14", "rule": "between", "val": ["100", "999999999"]}}
                         ],
                         "sort": {{"rule": "desc", "proId": "{sort_id}"}}
                     }};
@@ -259,7 +260,7 @@ def fetch_webull_gainers():
                     
         except Exception as e:
             if "API回傳空名單" in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前連一檔股票都擠不出來，持續監控中...", flush=True)
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] ⏳ Webull 目前連 100 股的跳空標的都找不出來，持續監控中...", flush=True)
             else:
                 print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 掃描異常: {e}", flush=True)
                 
@@ -272,7 +273,7 @@ def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V12.11 (微牛封印徹底拔除版)...", flush=True)
+    print("🔥 啟動 V12.12 (微牛 100 股誘捕解鎖版)...", flush=True)
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
