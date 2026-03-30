@@ -2,9 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V11 - 智慧省電與隨機排程版</title>
+    <title>ROSS Sniper V11.1 - 極淨斷電版</title>
     <style>
-        /* 頁面高度增加 1.5 倍 (150vh)，允許上下捲動 */
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -79,12 +78,9 @@
         let brainDetailsCache = {};
         let activeSymbol = "";
 
-        // ✨ 宣告全域計時器，讓我們可以隨時拔掉它的插頭！
+        // 宣告全域計時器，讓我們可以隨時拔掉它的插頭！
         let refreshTimeout;
 
-        // =====================================
-        // ✨ 自動儲存與讀取排版引擎 
-        // =====================================
         function saveLayout() {
             const layout = {};
             document.querySelectorAll('.window').forEach(win => {
@@ -113,14 +109,11 @@
             }
         }
 
-        // =====================================
-        // 視窗拖曳與控制邏輯
-        // =====================================
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
         
-        // 🎯 您提議的神級按鈕：按下去後徹底斷電/通電！
+        // 🎯 強制斷電閘刀
         function toggleEngineRun() {
             isEngineRunning = !isEngineRunning; 
             const btn = document.getElementById('engine-btn'); 
@@ -137,7 +130,7 @@
                 btn.style.background = "#3fb950"; 
                 btn.style.color="white"; 
                 statusEl.innerHTML = '⏸️ 系統已暫停更新 (伺服器準備休眠)'; 
-                clearTimeout(refreshTimeout); // 🔌 徹底拔掉插頭！不發送任何請求！
+                clearTimeout(refreshTimeout); // 🔌 徹底拔除所有排程
             }
         }
 
@@ -239,15 +232,16 @@
 
         let lastSuccessfulFetchTime = Date.now();
 
-        // 🎯 隨機排程引擎：抽出 5000 到 11000 毫秒之間的數字 (8秒加減3秒)
+        // 🎯 隨機排程引擎：抽出 5000 到 11000 毫秒之間的數字
         function scheduleNextRefresh() {
-            if(!isEngineRunning) return; // 確保暫停時不會排程
+            if(!isEngineRunning) return; // 雙重保險：確保暫停時絕對不會排程
             const randomDelay = Math.floor(Math.random() * 6000) + 5000; 
             refreshTimeout = setTimeout(refresh, randomDelay);
         }
 
         function refresh() {
-            if(!isEngineRunning) return;
+            if(!isEngineRunning) return; // 雙重保險：就算排程進來了，如果被關閉也強制退出
+            
             const ts = new Date().getTime();
             fetch('/data?t=' + ts)
                 .then(r => r.json())
@@ -309,12 +303,12 @@
                     if(activeSymbol && brainDetailsCache[activeSymbol]) { loadDetail(activeSymbol); }
                     saveLayout();
                     
-                    // 🎯 成功更新後，排程下一次的隨機拉取
+                    // 🎯 成功後排程下一次
                     scheduleNextRefresh();
                 })
                 .catch(err => {
                     console.error(err);
-                    // 即使發生錯誤，也要排程下一次，以免網頁死掉
+                    // 🎯 失敗後排程下一次，確保不斷線
                     scheduleNextRefresh();
                 });
         }
@@ -341,7 +335,7 @@
             refresh();
         };
 
-        // 這個監聽器只用來抓斷線問題，不負責送出請求
+        // 這個監聽器只用來抓斷線問題，絕對不負責送出 /data 請求
         setInterval(() => {
             const statusEl = document.getElementById('sys-status');
             if (isEngineRunning && (Date.now() - lastSuccessfulFetchTime > 20000)) {
