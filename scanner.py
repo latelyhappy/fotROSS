@@ -8,22 +8,21 @@ from io import StringIO
 from concurrent.futures import ThreadPoolExecutor
 
 import config
-from news_engine import fetch_news_bg
 
 # 🌟 全域背景執行緒池
 bg_task_pool = ThreadPoolExecutor(max_workers=10)
 
-# 🌟 新增：Yahoo 資料庫紅綠燈，防止多執行緒同時寫入快取造成 "database is locked"
+# 🌟 Yahoo 資料庫紅綠燈
 yf_lock = threading.Lock()
 
-# 🛡️ Cloudscraper 破甲防護模組
+# 🛡️ Cloudscraper 破甲防護模組 & 自訂 User-Agent 偽裝成真人 Windows 電腦
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
     print("🛡️ 已啟動 Cloudscraper 破甲模式！")
 except ImportError:
     scraper = requests.Session()
-    scraper.headers.update({"User-Agent": "Mozilla/5.0"})
+    scraper.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"})
 
 auto_hot_symbols = []       
 feed_gappers = []           
@@ -37,6 +36,64 @@ CATALYST_KEYWORDS = [
     '合作', '收購', '財報', '專利', '核准', '臨床', '併購', '合約', '營收'
 ]
 
+# ==========================================
+# 📰 新增：微牛 (Webull) 即時新聞直連引擎
+# ==========================================
+def fetch_webull_news_bg(ticker, cell):
+    try:
+        # 🛡️ 隨機秒數等待 (0.5 ~ 2秒)，打破機械化節奏，防止被微牛封鎖
+        time.sleep(random.uniform(0.5, 2.0))
+        
+        # 1. 取得微牛內部 TickerID
+        search_url = f"https://quotes-gw.webullfintech.com/api/search/pc/tickers?keyword={ticker}&regionId=6&pageIndex=1&pageSize=1"
+        res = scraper.get(search_url, timeout=10)
+        data = res.json()
+        ticker_list = data.get("data", [])
+        if not ticker_list:
+            raise ValueError("No tickerId")
+            
+        ticker_id = ticker_list[0].get("tickerId")
+        
+        # 2. 用 TickerID 抓取微牛最新即時新聞
+        news_url = f"https://quotes-gw.webullfintech.com/api/information/news/v8/tickerNews?tickerId={ticker_id}&currentNewsId=0&pageSize=10"
+        
+        n_res = scraper.get(news_url, timeout=10)
+        news_data = n_res.json()
+        
+        news_list = []
+        for n in news_data.get("news", [])[:5]:
+            title = n.get("title", "")
+            link = n.get("newsUrl", "")
+            pub_time = n.get("newsTime", "")
+            
+            # 時間格式化處理 (從 2024-03-27 15:30:00 擷取 15:30)
+            try:
+                if len(pub_time) > 10:
+                    time_str = pub_time[11:16] 
+                else:
+                    time_str = ""
+            except:
+                time_str = ""
+                
+            news_list.append({
+                "id": str(n.get("id", random.randint(1000, 9999))),
+                "title": title,
+                "score": 0,
+                "link": link,
+                "time": time_str,
+                "is_read": False
+            })
+            
+        if news_list:
+            cell["NewsList"] = news_list
+        else:
+            tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
+            cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView (微牛無即時新聞)", "score": 0, "link": tw_url, "time": ""}]
+            
+    except Exception as e:
+        tw_url = f"https://www.tradingview.com/chart/?symbol={ticker}"
+        cell["NewsList"] = [{"id": "0", "title": f"🗞️ 點擊前往 TradingView (微牛新聞擷取失敗)", "score": 0, "link": tw_url, "time": ""}]
+
 def get_market_rank_type():
     tz_ny = pytz.timezone('America/New_York')
     now_ny = datetime.now(tz_ny)
@@ -47,7 +104,6 @@ def get_market_rank_type():
 
 def fetch_static_bg(ticker):
     try:
-        # 🚦 拿號碼牌：只有拿到鎖的執行緒才可以呼叫 yfinance，防止資料庫鎖死
         with yf_lock:
             t = yf.Ticker(ticker)
             i = t.info
@@ -98,7 +154,7 @@ def update_or_add_gapper(new_entry):
     feed_gappers.insert(0, new_entry)
 
 # ==========================================
-# ★ Webull 主引擎 & 萬能備用雷達
+# ★ Webull 飆股主引擎 (嚴守 ROSS 排行榜邏輯)
 # ==========================================
 def fetch_webull_gainers():
     global auto_hot_symbols, feed_gappers
@@ -107,11 +163,11 @@ def fetch_webull_gainers():
     while True:
         try:
             rank_type, market_status = get_market_rank_type()
-            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 掃描中 ({market_status})...")
+            print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🕵️‍♂️ Webull 排行榜篩選中 ({market_status})...")
             
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
-                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36")
+                context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36")
                 page = context.new_page()
                 page.goto("https://app.webull.com/screener", timeout=30000)
                 time.sleep(4) 
@@ -190,7 +246,7 @@ def fetch_webull_gainers():
                     
         except Exception as e:
             if "深夜靜音模式切換" not in str(e):
-                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 失敗，啟動備用雷達...")
+                print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 Webull 篩選失敗，切換備用雷達...")
                 
             try:
                 rank_type, _ = get_market_rank_type()
@@ -253,13 +309,13 @@ def fetch_webull_gainers():
         time.sleep(random.randint(4, 12))
 
 # ==========================================
-# ★ Yahoo 副引擎 (精算與回補)
+# ★ 副引擎 (只追蹤排行榜中的名單，嚴守 ROSS 紀律)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
-    print("🔥 啟動 V10.5 (資料庫鎖定防禦消音版)...")
+    print("🔥 啟動 V12 (微牛即時新聞直連版)...")
     
     threading.Thread(target=fetch_webull_gainers, daemon=True).start()
     
@@ -275,6 +331,7 @@ def scanner_engine():
                     gap_entry['FloatStr'] = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
                     if "ChangeAmt" not in gap_entry: gap_entry['ChangeAmt'] = "$0.00"
 
+            # 🚨 紀律核心：只追蹤 auto_hot_symbols (微牛排行榜抓到的股票)
             symbols_to_track = list(set(auto_hot_symbols[:200]))
             
             if not symbols_to_track:
@@ -291,7 +348,6 @@ def scanner_engine():
                 
             wait_count = 0
             
-            # 🚦 同樣對主線程的高頻下載套用資料庫鎖，確保最深層的保護
             with yf_lock:
                 data_df = yf.download(symbols_to_track, period='1d', interval='1m', prepost=True, progress=False, timeout=10, group_by='ticker')
             
@@ -487,10 +543,11 @@ def scanner_engine():
                         item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
+                # 📰 觸發背景微牛新聞檢索
                 if not cell["NewsList"]: 
                     tw_url = f"https://www.tradingview.com/chart/?symbol={sym}"
-                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 點擊前往 TradingView 查看線圖", "score": 0, "link": tw_url, "time": ""}]
-                    bg_task_pool.submit(fetch_news_bg, sym, cell)
+                    cell["NewsList"] = [{"id": "0", "title": "🗞️ 正在連線微牛讀取即時新聞...", "score": 0, "link": tw_url, "time": ""}]
+                    bg_task_pool.submit(fetch_webull_news_bg, sym, cell)
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
                 cell["last_price"] = p_num
@@ -525,7 +582,6 @@ def scanner_engine():
             time.sleep(random.randint(4, 12))
             
         except Exception as e:
-            # 只有遇到非 Yahoo 內部的嚴重錯誤才印出
             if "database is locked" not in str(e) and "NoneType" not in str(e):
                 print(f"[{datetime.now(tz_tw).strftime('%H:%M:%S')}] 🚨 引擎錯誤 (已防護): {e}")
             time.sleep(5)
