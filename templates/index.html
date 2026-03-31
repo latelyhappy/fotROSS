@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16 - 視覺覺醒版</title>
+    <title>ROSS Sniper V16.1 - 視覺覺醒微調版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
@@ -76,8 +76,8 @@
         let activeSymbol = "";
         let refreshTimeout;
 
-        function saveLayout() { /* 佈局保存功能保持不變 */ }
-        function loadLayout() { /* 佈局載入功能保持不變 */ }
+        function saveLayout() { /* ... */ }
+        function loadLayout() { /* ... */ }
 
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
@@ -129,15 +129,17 @@
                     }
                     if (c.k === 'FloatStr') {
                         let fNum = parseFloat(row.FloatNum || 99999999);
-                        if (fNum < 2000000) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`; // 微型流通股 紫色
-                        else if (fNum < 10000000) val = `<span style="color:#58a6ff;">${val}</span>`; // 低流通 藍色
+                        if (fNum < 2000000) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`; 
+                        else if (fNum < 10000000) val = `<span style="color:#58a6ff;">${val}</span>`; 
                     }
                     if (c.k === 'RVOL') {
                         let rNum = parseFloat(row.RvolNum || 0);
-                        if (rNum >= 10.0) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`; // 異常爆量 火焰
+                        if (rNum >= 10.0) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`; 
                     }
                     if (c.k === 'Streak') {
-                        if (val.includes('極速') || val.includes('回踩') || val.includes('精準')) val = `<span style="color:#e34c26; font-weight:900;">${val}</span>`;
+                        // 讓文字顏色也跟著視覺風格走
+                        if (val.includes('EMA49')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; // 淡黃金字
+                        else if (val.includes('極速') || val.includes('精準')) val = `<span style="color:#d2a8ff; font-weight:900;">${val}</span>`; // 紫字
                         else if (val.includes('準備')) val = `<span style="color:#e3b341; font-weight:bold;">${val}</span>`;
                     }
                     html += `<td>${val}</td>`;
@@ -150,16 +152,23 @@
             container.scrollTop = oldScrollTop;
         }
 
-        // 共用的行動指標背景渲染函數 (黃金10分鐘 + 訊號色)
+        // 🎨 戰情室專屬顏色判斷邏輯
         function getActionRowStyle(row) {
+            // 優先級 1：最新突發新聞 -> 淡藍色 (Light Blue)
             if (row.HasFreshNews) {
-                // 黃金 10 分鐘新聞：暗黃金色漸層底色
-                return 'style="background: linear-gradient(90deg, rgba(210,153,34,0.3) 0%, rgba(210,153,34,0.05) 100%); border-left: 3px solid gold;"';
+                return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.25) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
             }
+            
             if (row.Streak) {
-                if (row.Streak.includes('極速') || row.Streak.includes('回踩') || row.Streak.includes('精準')) {
+                // 優先級 2：EMA49 多頭買點 -> 淡黃色 (Light Yellow)
+                if (row.Streak.includes('EMA49多頭')) {
+                    return 'style="background: rgba(255, 234, 0, 0.12); border-left: 3px solid #ffea00;"';
+                }
+                // 優先級 3：極速 / 精準回調 -> 紫色 (Purple)
+                if (row.Streak.includes('極速') || row.Streak.includes('精準')) {
                     return 'style="background:rgba(156, 39, 176, 0.2); border-left: 3px solid #d2a8ff;"';
                 }
+                // 優先級 4：爆量 / 準備突破 -> 暗橘/暗金
                 if (row.Streak.includes('爆量') || row.Streak.includes('準備突破')) {
                     return 'style="background:rgba(210,153,34,0.1); border-left: 3px solid #d29922;"';
                 }
@@ -179,7 +188,7 @@
 
         function scheduleNextRefresh() {
             if(!isEngineRunning) return; 
-            refreshTimeout = setTimeout(refresh, 3000); // 鎖定 3 秒極限更新
+            refreshTimeout = setTimeout(refresh, 3000); 
         }
 
         function refresh() {
@@ -189,7 +198,7 @@
             fetch('/data?t=' + ts)
                 .then(r => r.json())
                 .then(d => {
-                    document.getElementById('sys-status').innerHTML = `🟢 V16 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
+                    document.getElementById('sys-status').innerHTML = `🟢 V16.1 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
                     document.getElementById('sys-status').style.backgroundColor = 'rgba(13, 17, 23, 0.8)';
                     document.getElementById('sys-status').style.color = '#3fb950';
 
