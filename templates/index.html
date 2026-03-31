@@ -2,12 +2,12 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16.1 - 視覺覺醒微調版</title>
+    <title>ROSS Sniper V16.1 - 視覺覺醒完整版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
-        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; }
+        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 5px 10px; font-size: 11px; font-weight: bold; cursor: grab; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #30363d; user-select: none; }
         .bg-blue, .bg-green, .bg-gold, .bg-red, .bg-purple, .bg-dark { background: transparent; }
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; bottom: 0; right: 0; cursor: se-resize; }
@@ -76,9 +76,92 @@
         let activeSymbol = "";
         let refreshTimeout;
 
-        function saveLayout() { /* ... */ }
-        function loadLayout() { /* ... */ }
+        // ==========================================
+        // 🖱️ 視窗拖曳與縮放核心 (V16.1 完整還原)
+        // ==========================================
+        let draggedWindow = null;
+        let resizedWindow = null;
+        let offsetX = 0, offsetY = 0, startWidth = 0, startHeight = 0, startX = 0, startY = 0;
 
+        document.querySelectorAll('.title-bar').forEach(bar => {
+            bar.addEventListener('mousedown', e => {
+                if (isGlobalLocked || e.target.tagName.toLowerCase() === 'BUTTON') return;
+                draggedWindow = bar.parentElement;
+                draggedWindow.style.zIndex = 100;
+                
+                // 計算相對於目前縮放比例的滑鼠位置
+                const rect = draggedWindow.getBoundingClientRect();
+                offsetX = (e.clientX - rect.left) / currentZoom;
+                offsetY = (e.clientY - rect.top) / currentZoom;
+            });
+        });
+
+        document.querySelectorAll('.resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', e => {
+                if (isGlobalLocked) return;
+                resizedWindow = handle.parentElement;
+                resizedWindow.style.zIndex = 100;
+                
+                const rect = resizedWindow.getBoundingClientRect();
+                startWidth = rect.width / currentZoom;
+                startHeight = rect.height / currentZoom;
+                startX = e.clientX / currentZoom;
+                startY = e.clientY / currentZoom;
+                e.stopPropagation();
+            });
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (draggedWindow) {
+                let newX = (e.clientX / currentZoom) - offsetX;
+                let newY = (e.clientY / currentZoom) - offsetY;
+                draggedWindow.style.left = newX + 'px';
+                draggedWindow.style.top = newY + 'px';
+            }
+            if (resizedWindow) {
+                let newWidth = startWidth + (e.clientX / currentZoom - startX);
+                let newHeight = startHeight + (e.clientY / currentZoom - startY);
+                resizedWindow.style.width = newWidth + 'px';
+                resizedWindow.style.height = newHeight + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (draggedWindow) { draggedWindow.style.zIndex = 1; draggedWindow = null; saveLayout(); }
+            if (resizedWindow) { resizedWindow.style.zIndex = 1; resizedWindow = null; saveLayout(); }
+        });
+
+        // ==========================================
+        // 💾 排版記憶系統
+        // ==========================================
+        function saveLayout() {
+            const layout = {};
+            document.querySelectorAll('.window').forEach(win => {
+                layout[win.id] = {
+                    top: win.style.top, left: win.style.left,
+                    width: win.style.width, height: win.style.height
+                };
+            });
+            localStorage.setItem('rossLayoutV16', JSON.stringify(layout));
+        }
+
+        function loadLayout() {
+            const saved = localStorage.getItem('rossLayoutV16');
+            if (saved) {
+                const layout = JSON.parse(saved);
+                for (const [id, rect] of Object.entries(layout)) {
+                    const win = document.getElementById(id);
+                    if (win) {
+                        win.style.top = rect.top; win.style.left = rect.left;
+                        win.style.width = rect.width; win.style.height = rect.height;
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 🎛️ 系統控制按鈕
+        // ==========================================
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
@@ -137,9 +220,8 @@
                         if (rNum >= 10.0) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`; 
                     }
                     if (c.k === 'Streak') {
-                        // 讓文字顏色也跟著視覺風格走
-                        if (val.includes('EMA49')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; // 淡黃金字
-                        else if (val.includes('極速') || val.includes('精準')) val = `<span style="color:#d2a8ff; font-weight:900;">${val}</span>`; // 紫字
+                        if (val.includes('EMA49')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; 
+                        else if (val.includes('極速') || val.includes('精準')) val = `<span style="color:#d2a8ff; font-weight:900;">${val}</span>`; 
                         else if (val.includes('準備')) val = `<span style="color:#e3b341; font-weight:bold;">${val}</span>`;
                     }
                     html += `<td>${val}</td>`;
@@ -152,23 +234,18 @@
             container.scrollTop = oldScrollTop;
         }
 
-        // 🎨 戰情室專屬顏色判斷邏輯
+        // 🎨 戰情室專屬顏色判斷邏輯 (V16.1)
         function getActionRowStyle(row) {
-            // 優先級 1：最新突發新聞 -> 淡藍色 (Light Blue)
             if (row.HasFreshNews) {
                 return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.25) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
             }
-            
             if (row.Streak) {
-                // 優先級 2：EMA49 多頭買點 -> 淡黃色 (Light Yellow)
                 if (row.Streak.includes('EMA49多頭')) {
                     return 'style="background: rgba(255, 234, 0, 0.12); border-left: 3px solid #ffea00;"';
                 }
-                // 優先級 3：極速 / 精準回調 -> 紫色 (Purple)
                 if (row.Streak.includes('極速') || row.Streak.includes('精準')) {
                     return 'style="background:rgba(156, 39, 176, 0.2); border-left: 3px solid #d2a8ff;"';
                 }
-                // 優先級 4：爆量 / 準備突破 -> 暗橘/暗金
                 if (row.Streak.includes('爆量') || row.Streak.includes('準備突破')) {
                     return 'style="background:rgba(210,153,34,0.1); border-left: 3px solid #d29922;"';
                 }
@@ -277,7 +354,7 @@
             document.getElementById('detail-list').innerHTML = `<div id="hud-ticker" style="font-size: 36px; font-weight: 900; color: #58a6ff; text-align: center; margin-bottom: 8px; cursor: pointer; letter-spacing: 2px; text-shadow: 0 0 10px rgba(88, 166, 255, 0.3);" ondblclick="openTW('${sym}', event)" title="雙擊開啟 TradingView">${sym}</div><div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin-bottom:5px;"><div class="p-box">今日最高<div class="p-val">${d.HOD_str || d.HOD}</div></div><div class="p-box">量比<div class="p-val">${d.RVOL}</div></div><div class="p-box">浮動股<div class="p-val" style="color:#58a6ff;">${d.FloatStr}</div></div></div>${newsHTML}`;
         }
 
-        window.onload = () => { refresh(); };
+        window.onload = () => { loadLayout(); refresh(); };
         
     </script>
 </body>
