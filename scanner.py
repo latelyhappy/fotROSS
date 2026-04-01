@@ -59,7 +59,7 @@ def fetch_direct_news_bg(ticker, cell):
         today_str = now_ny.strftime("%Y-%m-%d")
         
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={ticker}&quotesCount=0&newsCount=5"
-        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}, timeout=5)
+        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         
         if res.status_code == 200:
             news_items = res.json().get('news', [])
@@ -96,7 +96,7 @@ def fetch_direct_news_bg(ticker, cell):
             new_articles.append({
                 "id": str(random.randint(10000, 99999)), "title": translated_title,
                 "score": 0, "link": raw_link, "time": display_str, "is_today": is_today, "is_read": False,
-                "pub_ts": pub_ts # V16 寫入時間戳記供黃金 10 分鐘計算
+                "pub_ts": pub_ts
             })
             
             if len(new_articles) >= 5: break
@@ -248,14 +248,14 @@ def fetch_tv_gainers():
         time.sleep(random.randint(3, 5))
 
 # ==========================================
-# ★ 主控引擎 (EMA49多頭護城河 + 黃金 10 分鐘新聞)
+# ★ 主控引擎 (V16.2 雙鎖超時版)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_ny = pytz.timezone('America/New_York')
-    print("🔥 啟動 V16 終極覺醒版 (EMA49多頭回踩 + 黃金10分鐘新聞底色)...", flush=True)
+    print("🔥 啟動 V16.2 流動性守護者版 (180秒超時註銷 + 300K/1.2x 雙鎖)...", flush=True)
     
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
@@ -315,7 +315,6 @@ def scanner_engine():
                             if len(close_series) >= 10:
                                 ema49_series = close_series.ewm(span=49, adjust=False).mean()
                                 ema49_val = float(ema49_series.iloc[-1])
-                                # 🚨 判斷 EMA49 是否呈現「上漲趨勢 (多頭排列)」
                                 if len(ema49_series) >= 2:
                                     ema49_prev = float(ema49_series.iloc[-2])
                                     if ema49_val > ema49_prev:
@@ -375,20 +374,22 @@ def scanner_engine():
                 cell.setdefault("is_grinder", False)
                 cell.setdefault("recent_high", initial_hod)
                 cell.setdefault("is_pullback", False)
-                cell.setdefault("sniper_triggered", False)
+                
+                # 🚨 V16.2 Timeout 屬性初始化
+                cell.setdefault("sniper_start_time", 0)
+                cell.setdefault("sniper_label_last", "")
+                
                 cell.setdefault("surge_start_price", initial_hod)
                 cell.setdefault("max_surge_vol", 0)
                 cell.setdefault("pullback_low", p_num)
-                cell.setdefault("sniper_label", "")
                 cell.setdefault("pos_vol_streak", 0)
                 cell.setdefault("neg_vol_streak", 0)
                 cell.setdefault("GrindCount", 0)
                 
-                # 判斷是否有 10 分鐘內的熱騰騰新聞
                 has_fresh_news = False
                 for news in cell.get("NewsList", []):
                     pub_ts = news.get("pub_ts", 0)
-                    if pub_ts > 0 and (now_ny_ts - pub_ts) <= 600: # 600 秒 = 10 分鐘
+                    if pub_ts > 0 and (now_ny_ts - pub_ts) <= 600:
                         has_fresh_news = True
                         break
 
@@ -424,26 +425,28 @@ def scanner_engine():
                 surge_start_price = cell["surge_start_price"]
                 is_pullback = cell["is_pullback"]
                 max_surge_vol = cell["max_surge_vol"]
-                sniper_triggered = False
-                sniper_label = ""
+                
+                # 🚨 V16.2 條件判定區
+                sniper_triggered_this_tick = False
+                sniper_label_this_tick = ""
                 
                 dist_to_hod = (cell["HOD"] - p_num) / p_num if p_num > 0 else 1
                 if 0 < dist_to_hod <= 0.015 and vol_raw >= surge_vol_threshold * 0.5:
-                    sniper_triggered = True
-                    sniper_label = "⏳準備突破"
+                    sniper_triggered_this_tick = True
+                    sniper_label_this_tick = "⏳準備突破"
                 
-                # 🚨 V16 EMA49 終極條件：必須在射程內，且 EMA49「必須」是上漲趨勢 (多頭)！
-                if ema49 > 0 and ema49_is_uptrend:
+                # 🚨 V16.2 終極流動性雙重鎖 (總量 > 30萬 且 RVOL > 1.2x)
+                if ema49 > 0 and ema49_is_uptrend and vol_raw >= 300000 and rvol_calc >= 1.2:
                     dist_now = abs(p_num - ema49)
                     if 0.1 <= dist_now <= 0.3 and dist_3_ago > dist_now * 2:
-                        sniper_triggered = True
-                        sniper_label = "🧲EMA49多頭回踩"
+                        sniper_triggered_this_tick = True
+                        sniper_label_this_tick = "🧲EMA多頭(帶量)"
                 
                 if p_num > recent_high:
                     if is_pullback:
                         if p_num > cell["pullback_low"] * 1.01: 
-                            sniper_triggered = True
-                            sniper_label = "🎯精準回調"
+                            sniper_triggered_this_tick = True
+                            sniper_label_this_tick = "🎯精準回調"
                         is_pullback = False
                         surge_start_price = p_num
                         max_surge_vol = curr_vol_delta
@@ -452,11 +455,11 @@ def scanner_engine():
                     
                     if is_hod_break:
                         if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0: 
-                            sniper_triggered = True
-                            sniper_label = "⚠️爆量突破"
+                            sniper_triggered_this_tick = True
+                            sniper_label_this_tick = "⚠️爆量突破"
                         elif curr_vol_delta > 0 and curr_vol_delta < 5000: 
-                            sniper_triggered = True
-                            sniper_label = "⚠️虛漲(無量誘多)"
+                            sniper_triggered_this_tick = True
+                            sniper_label_this_tick = "⚠️虛漲(無量誘多)"
                             
                 elif p_num < last_price:
                     swing_size = recent_high - surge_start_price
@@ -473,15 +476,26 @@ def scanner_engine():
                 cell["is_pullback"] = is_pullback
                 cell["max_surge_vol"] = max_surge_vol
                 
-                if sniper_triggered: 
-                    cell["sniper_triggered"] = True
-                    cell["sniper_label"] = sniper_label
+                # 🚨 V16.2 超時 (Timeout) 判斷機制：超過 180 秒自動註銷
+                if sniper_triggered_this_tick:
+                    if cell.get("sniper_label_last") != sniper_label_this_tick:
+                        cell["sniper_start_time"] = time.time()
+                        cell["sniper_label_last"] = sniper_label_this_tick
+                    
+                    if time.time() - cell.get("sniper_start_time", time.time()) > 180:
+                        sniper_triggered_this_tick = False # 已超時，消滅燈號
+                        sniper_label_this_tick = ""
                 else:
-                    cell["sniper_triggered"] = False
+                    cell["sniper_start_time"] = 0
+                    cell["sniper_label_last"] = ""
+                
+                # 更新最終狀態
+                cell["sniper_triggered"] = sniper_triggered_this_tick
+                cell["sniper_label"] = sniper_label_this_tick
                 
                 streak_text = f"x{cell['streak']}"
-                if is_hod_break: streak_text = f"⭐破高+{cell['sniper_label']}" if sniper_triggered else f"⭐破高{streak_text}"
-                elif sniper_triggered: streak_text = f"{cell['sniper_label']}"
+                if is_hod_break: streak_text = f"⭐破高+{cell['sniper_label']}" if sniper_triggered_this_tick else f"⭐破高{streak_text}"
+                elif sniper_triggered_this_tick: streak_text = f"{cell['sniper_label']}"
 
                 has_catalyst = False
                 for news in cell["NewsList"]:
@@ -496,15 +510,15 @@ def scanner_engine():
                     "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
                     "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"]),
-                    "HasFreshNews": has_fresh_news, "FloatNum": f, "RvolNum": rvol_calc # 傳給前端的視覺化變數
+                    "HasFreshNews": has_fresh_news, "FloatNum": f, "RvolNum": rvol_calc
                 }
 
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
-                # 只要觸發 EMA49 多頭回踩 或 突破，直接打進動能表格！
-                if sniper_triggered or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
-                    if not sniper_triggered: item["Streak"] = "⚡極速(9EMA)"
+                # 送入短線動能追蹤表
+                if sniper_triggered_this_tick or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
+                    if not sniper_triggered_this_tick: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
                 if count % 30 == 0 or not cell["NewsList"]: 
