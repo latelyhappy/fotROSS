@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16.1 - 視覺覺醒完整版</title>
+    <title>ROSS Sniper V16.2 - 流動性守護者版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
@@ -76,9 +76,6 @@
         let activeSymbol = "";
         let refreshTimeout;
 
-        // ==========================================
-        // 🖱️ 視窗拖曳與縮放核心 (V16.1 完整還原)
-        // ==========================================
         let draggedWindow = null;
         let resizedWindow = null;
         let offsetX = 0, offsetY = 0, startWidth = 0, startHeight = 0, startX = 0, startY = 0;
@@ -88,8 +85,6 @@
                 if (isGlobalLocked || e.target.tagName.toLowerCase() === 'BUTTON') return;
                 draggedWindow = bar.parentElement;
                 draggedWindow.style.zIndex = 100;
-                
-                // 計算相對於目前縮放比例的滑鼠位置
                 const rect = draggedWindow.getBoundingClientRect();
                 offsetX = (e.clientX - rect.left) / currentZoom;
                 offsetY = (e.clientY - rect.top) / currentZoom;
@@ -101,7 +96,6 @@
                 if (isGlobalLocked) return;
                 resizedWindow = handle.parentElement;
                 resizedWindow.style.zIndex = 100;
-                
                 const rect = resizedWindow.getBoundingClientRect();
                 startWidth = rect.width / currentZoom;
                 startHeight = rect.height / currentZoom;
@@ -131,17 +125,9 @@
             if (resizedWindow) { resizedWindow.style.zIndex = 1; resizedWindow = null; saveLayout(); }
         });
 
-        // ==========================================
-        // 💾 排版記憶系統
-        // ==========================================
         function saveLayout() {
             const layout = {};
-            document.querySelectorAll('.window').forEach(win => {
-                layout[win.id] = {
-                    top: win.style.top, left: win.style.left,
-                    width: win.style.width, height: win.style.height
-                };
-            });
+            document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; });
             localStorage.setItem('rossLayoutV16', JSON.stringify(layout));
         }
 
@@ -151,17 +137,11 @@
                 const layout = JSON.parse(saved);
                 for (const [id, rect] of Object.entries(layout)) {
                     const win = document.getElementById(id);
-                    if (win) {
-                        win.style.top = rect.top; win.style.left = rect.left;
-                        win.style.width = rect.width; win.style.height = rect.height;
-                    }
+                    if (win) { win.style.top = rect.top; win.style.left = rect.left; win.style.width = rect.width; win.style.height = rect.height; }
                 }
             }
         }
 
-        // ==========================================
-        // 🎛️ 系統控制按鈕
-        // ==========================================
         function changeZoom(delta) { currentZoom += delta; if(currentZoom < 0.5) currentZoom = 0.5; if(currentZoom > 2.0) currentZoom = 2.0; document.body.style.transform = `scale(${currentZoom})`; }
         function resetZoom() { currentZoom = 1.0; document.body.style.transform = `scale(1.0)`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; const btn = document.getElementById('lock-btn'); if(isGlobalLocked) { btn.innerText = "🔒 視窗已鎖定"; btn.style.background = "#f85149"; btn.style.color="white";} else { btn.innerText = "🔓 視窗解鎖"; btn.style.background = "#21262d"; btn.style.color="#c9d1d9";} }
@@ -220,7 +200,7 @@
                         if (rNum >= 10.0) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`; 
                     }
                     if (c.k === 'Streak') {
-                        if (val.includes('EMA49')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; 
+                        if (val.includes('EMA多頭')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; 
                         else if (val.includes('極速') || val.includes('精準')) val = `<span style="color:#d2a8ff; font-weight:900;">${val}</span>`; 
                         else if (val.includes('準備')) val = `<span style="color:#e3b341; font-weight:bold;">${val}</span>`;
                     }
@@ -234,13 +214,13 @@
             container.scrollTop = oldScrollTop;
         }
 
-        // 🎨 戰情室專屬顏色判斷邏輯 (V16.1)
+        // 🎨 戰情室專屬顏色判斷邏輯 (V16.2 雙鎖超時版)
         function getActionRowStyle(row) {
             if (row.HasFreshNews) {
                 return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.25) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
             }
             if (row.Streak) {
-                if (row.Streak.includes('EMA49多頭')) {
+                if (row.Streak.includes('EMA多頭')) {
                     return 'style="background: rgba(255, 234, 0, 0.12); border-left: 3px solid #ffea00;"';
                 }
                 if (row.Streak.includes('極速') || row.Streak.includes('精準')) {
@@ -275,7 +255,7 @@
             fetch('/data?t=' + ts)
                 .then(r => r.json())
                 .then(d => {
-                    document.getElementById('sys-status').innerHTML = `🟢 V16.1 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
+                    document.getElementById('sys-status').innerHTML = `🟢 V16.2 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
                     document.getElementById('sys-status').style.backgroundColor = 'rgba(13, 17, 23, 0.8)';
                     document.getElementById('sys-status').style.color = '#3fb950';
 
@@ -298,11 +278,12 @@
                     lastKnownHodData = d.hod;
                     renderHOD(d.hod);
 
+                    // 🚨 V16.2: 短線動能追蹤 加入 Volume(總量) 與 RVOL(量比)，隱藏 ChangeAmt 騰出空間
                     renderTable('surge-list', d.surge, [
-                        {n:'時間', k:'Time', w:'10%'}, {n:'代碼', k:'Code', w:'12%'},
-                        {n:'價格', k:'Price', w:'12%'}, {n:'漲跌$', k:'ChangeAmt', w:'12%'},
-                        {n:'漲跌%', k:'Change', w:'12%'}, {n:'🎯訊號', k:'Streak', w:'28%'},
-                        {n:'淨買量', k:'NetVolStr', w:'14%'}
+                        {n:'時間', k:'Time', w:'9%'}, {n:'代碼', k:'Code', w:'11%'},
+                        {n:'價格', k:'Price', w:'11%'}, {n:'漲跌%', k:'Change', w:'11%'},
+                        {n:'總量', k:'Volume', w:'13%'}, {n:'量比', k:'RVOL', w:'11%'},
+                        {n:'🎯訊號', k:'Streak', w:'22%'}, {n:'淨買量', k:'NetVolStr', w:'12%'}
                     ], getActionRowStyle);
 
                     renderTable('news-score-list', d.news_leaders, [
