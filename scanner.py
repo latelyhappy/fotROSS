@@ -233,7 +233,7 @@ def fetch_tv_gainers():
                         "Time": datetime.now(tz_tw).strftime('%H:%M:%S'), "Code": sym,
                         "Price": f"${p_val_float:.2f}",
                         "ChangeAmt": chg_amt_str, "Change": chg_str, 
-                        "Volume": format_vol_km(v_float), "RVOL": f"{rvol_val:.1f}x" if rvol_val > 0 else "0.0x",
+                        "Volume": format_vol_km(v_float), "vol_raw_daily": v_float, "RVOL": f"{rvol_val:.1f}x",
                         "FloatStr": float_str, "discovery_time": time.time()
                     }
                     update_or_add_gapper(new_entry)
@@ -248,14 +248,14 @@ def fetch_tv_gainers():
         time.sleep(random.randint(3, 5))
 
 # ==========================================
-# ★ 主控引擎 (V16.2 雙鎖超時版)
+# ★ 主控引擎 (V16.3 真實數據抓取版)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     count = 0
     tz_tw = pytz.timezone('Asia/Taipei')
     tz_ny = pytz.timezone('America/New_York')
-    print("🔥 啟動 V16.2 流動性守護者版 (180秒超時註銷 + 300K/1.2x 雙鎖)...", flush=True)
+    print("🔥 啟動 V16.3 (修正短線表格與流動性抓取 Bug)...", flush=True)
     
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
@@ -265,12 +265,6 @@ def scanner_engine():
             current_time_tw = datetime.now(tz_tw).strftime('%H:%M:%S')
             now_ny_ts = datetime.now(tz_ny).timestamp()
             
-            for gap_entry in feed_gappers:
-                if "FloatStr" not in gap_entry or "ChangeAmt" not in gap_entry:
-                    f, _, _ = get_static(gap_entry['Code'])
-                    gap_entry['FloatStr'] = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
-                    if "ChangeAmt" not in gap_entry: gap_entry['ChangeAmt'] = "$0.00"
-
             symbols_to_track = list(set(auto_hot_symbols[:100]))
             
             if not symbols_to_track:
@@ -306,7 +300,7 @@ def scanner_engine():
                         
                         if not close_series.empty:
                             p_num = float(close_series.iloc[-1])
-                            vol = float(vol_series.iloc[-1])
+                            vol_1m = float(vol_series.iloc[-1]) # 這是1分鐘的成交量
                             
                             ema49_val = 0.0
                             dist_3_ago = 999.0
@@ -324,7 +318,7 @@ def scanner_engine():
                                     dist_3_ago = abs(float(close_series.iloc[-4]) - float(ema49_series.iloc[-4]))
                                 
                             extracted_stocks.append({
-                                'sym': sym, 'price': p_num, 'vol_raw': vol, 'rvol_tw': vol / 50000.0,
+                                'sym': sym, 'price': p_num, 'vol_1m': vol_1m,
                                 'ema49': ema49_val, 'dist_3_ago': dist_3_ago, 'ema49_is_uptrend': ema49_is_uptrend
                             })
                     except:
@@ -336,8 +330,7 @@ def scanner_engine():
             for data in extracted_stocks:
                 sym = data['sym']
                 p_num = data['price']
-                vol_raw = data['vol_raw']
-                rvol = data['rvol_tw']
+                vol_1m = data['vol_1m']
                 ema49 = data['ema49']
                 dist_3_ago = data['dist_3_ago']
                 ema49_is_uptrend = data['ema49_is_uptrend']
@@ -349,16 +342,27 @@ def scanner_engine():
                 change_str = f"+{change_pct:.2f}%" if change_pct > 0 else f"{change_pct:.2f}%"
                 chg_amt = p_num - prev_close
                 chg_amt_str = f"+${chg_amt:.2f}" if chg_amt > 0 else f"-${abs(chg_amt):.2f}"
-                rvol_calc = (vol_raw / a) if a > 0 else 0.0
+                
+                # 🚨 V16.3 核心修復：從 TradingView 抓取真實的「日總量」與「量比」，並同步給全部表格
+                daily_vol_num = 0.0
+                daily_vol_str = "0K"
+                daily_rvol_str = "0.0x"
+                daily_rvol_num = 0.0
                 
                 for gap_entry in feed_gappers:
                     if gap_entry['Code'] == sym:
+                        daily_vol_num = gap_entry.get('vol_raw_daily', 0.0)
+                        daily_vol_str = gap_entry.get('Volume', '0K')
+                        daily_rvol_str = gap_entry.get('RVOL', '0.0x')
+                        try:
+                            daily_rvol_num = float(daily_rvol_str.replace('x', ''))
+                        except: pass
+                        
+                        # 更新跳空表最新價格
                         if "獲取中" in gap_entry['Price'] or "$0" in gap_entry['Price']: gap_entry['Price'] = f"${p_num:.2f}"
-                        if gap_entry['Volume'] == "0K" or gap_entry['Volume'] == "0": gap_entry['Volume'] = format_vol_km(vol_raw)
-                        if "雷達" in gap_entry['RVOL'] or "計算中" in gap_entry['RVOL'] or gap_entry['RVOL'] == "0.0x": gap_entry['RVOL'] = f"{rvol_calc:.1f}x"
                         if "0%" in gap_entry['Change'] or gap_entry['Change'] == "0": gap_entry['Change'] = change_str
                         if "$0.00" in gap_entry.get('ChangeAmt', '$0.00'): gap_entry['ChangeAmt'] = chg_amt_str
-                        gap_entry['FloatStr'] = float_str
+                        break
                 
                 is_new_stock = sym not in config.MASTER_BRAIN["details"]
                 initial_hod = (p_num * 0.98) if is_new_stock else p_num
@@ -375,7 +379,6 @@ def scanner_engine():
                 cell.setdefault("recent_high", initial_hod)
                 cell.setdefault("is_pullback", False)
                 
-                # 🚨 V16.2 Timeout 屬性初始化
                 cell.setdefault("sniper_start_time", 0)
                 cell.setdefault("sniper_label_last", "")
                 
@@ -400,22 +403,22 @@ def scanner_engine():
                     is_hod_break = True
                 
                 last_price = cell["last_price"]
-                curr_vol_delta = vol_raw
                 
-                if curr_vol_delta > 0:
+                # 計算淨買量 (使用 1分鐘 K 線推算增量)
+                if vol_1m > 0:
                     if p_num > last_price:
-                        cell["cum_buy_vol"] += curr_vol_delta
+                        cell["cum_buy_vol"] += vol_1m
                         cell["pos_vol_streak"] += 1
                         cell["neg_vol_streak"] = 0
                         cell["GrindCount"] += 1
                     elif p_num < last_price:
-                        cell["cum_sell_vol"] += curr_vol_delta
+                        cell["cum_sell_vol"] += vol_1m
                         cell["neg_vol_streak"] += 1
                         cell["pos_vol_streak"] = 0
                         cell["GrindCount"] -= 1
                 net_vol = cell["cum_buy_vol"] - cell["cum_sell_vol"]
 
-                if cell["GrindCount"] >= 3 and cell["pos_vol_streak"] >= 3 and vol_raw < 500000:
+                if cell["GrindCount"] >= 3 and cell["pos_vol_streak"] >= 3 and daily_vol_num < 500000:
                     cell["is_grinder"] = True
                     active_grinders.append({"Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}", "Streak": f"🔥無量緩推(連{cell['pos_vol_streak']}分)", "ChangeAmt": chg_amt_str, "Change": change_str, "GrindCount": cell["GrindCount"]})
                 elif cell["GrindCount"] <= -2:
@@ -426,17 +429,16 @@ def scanner_engine():
                 is_pullback = cell["is_pullback"]
                 max_surge_vol = cell["max_surge_vol"]
                 
-                # 🚨 V16.2 條件判定區
                 sniper_triggered_this_tick = False
                 sniper_label_this_tick = ""
                 
                 dist_to_hod = (cell["HOD"] - p_num) / p_num if p_num > 0 else 1
-                if 0 < dist_to_hod <= 0.015 and vol_raw >= surge_vol_threshold * 0.5:
+                if 0 < dist_to_hod <= 0.015 and vol_1m >= surge_vol_threshold * 0.5:
                     sniper_triggered_this_tick = True
                     sniper_label_this_tick = "⏳準備突破"
                 
-                # 🚨 V16.2 終極流動性雙重鎖 (總量 > 30萬 且 RVOL > 1.2x)
-                if ema49 > 0 and ema49_is_uptrend and vol_raw >= 300000 and rvol_calc >= 1.2:
+                # 🚨 V16.3 修復：正確套用「日總量 > 30萬」且「量比 > 1.2」的雙重鎖
+                if ema49 > 0 and ema49_is_uptrend and daily_vol_num >= 300000 and daily_rvol_num >= 1.2:
                     dist_now = abs(p_num - ema49)
                     if 0.1 <= dist_now <= 0.3 and dist_3_ago > dist_now * 2:
                         sniper_triggered_this_tick = True
@@ -449,15 +451,15 @@ def scanner_engine():
                             sniper_label_this_tick = "🎯精準回調"
                         is_pullback = False
                         surge_start_price = p_num
-                        max_surge_vol = curr_vol_delta
-                    else: max_surge_vol = max(max_surge_vol, curr_vol_delta)
+                        max_surge_vol = vol_1m
+                    else: max_surge_vol = max(max_surge_vol, vol_1m)
                     recent_high = p_num
                     
                     if is_hod_break:
-                        if curr_vol_delta > max_surge_vol * 1.5 and max_surge_vol > 0: 
+                        if vol_1m > max_surge_vol * 1.5 and max_surge_vol > 0: 
                             sniper_triggered_this_tick = True
                             sniper_label_this_tick = "⚠️爆量突破"
-                        elif curr_vol_delta > 0 and curr_vol_delta < 5000: 
+                        elif vol_1m > 0 and vol_1m < 5000: 
                             sniper_triggered_this_tick = True
                             sniper_label_this_tick = "⚠️虛漲(無量誘多)"
                             
@@ -476,20 +478,18 @@ def scanner_engine():
                 cell["is_pullback"] = is_pullback
                 cell["max_surge_vol"] = max_surge_vol
                 
-                # 🚨 V16.2 超時 (Timeout) 判斷機制：超過 180 秒自動註銷
                 if sniper_triggered_this_tick:
                     if cell.get("sniper_label_last") != sniper_label_this_tick:
                         cell["sniper_start_time"] = time.time()
                         cell["sniper_label_last"] = sniper_label_this_tick
                     
                     if time.time() - cell.get("sniper_start_time", time.time()) > 180:
-                        sniper_triggered_this_tick = False # 已超時，消滅燈號
+                        sniper_triggered_this_tick = False
                         sniper_label_this_tick = ""
                 else:
                     cell["sniper_start_time"] = 0
                     cell["sniper_label_last"] = ""
                 
-                # 更新最終狀態
                 cell["sniper_triggered"] = sniper_triggered_this_tick
                 cell["sniper_label"] = sniper_label_this_tick
                 
@@ -502,22 +502,22 @@ def scanner_engine():
                     for kw in CATALYST_KEYWORDS:
                         if kw in news.get("title", "").upper(): has_catalyst = True; cell["max_news_score"] += 10; break
                 
+                # 🚨 V16.3 將正確的日總量與日量比，寫入要送到前端的字典中
                 item = {
                     "Time": current_time_tw, "Code": sym, "Price": f"${p_num:.2f}",
                     "ChangeAmt": chg_amt_str, "Change": change_str, 
-                    "Volume": format_vol_km(vol_raw), "vol_raw": vol_raw,
-                    "RVOL": f"{rvol_calc:.1f}x", "FloatStr": float_str, "Streak": streak_text,
+                    "Volume": daily_vol_str, "vol_raw": daily_vol_num,
+                    "RVOL": daily_rvol_str, "FloatStr": float_str, "Streak": streak_text,
                     "NetVolNum": net_vol, "NewsScore": cell["max_news_score"], "HasCatalyst": has_catalyst, 
                     "NetVolStr": f"+{format_vol_km(net_vol)}" if net_vol > 0 else f"-{format_vol_km(abs(net_vol))}",
                     "BuyVolStr": format_vol_km(cell["cum_buy_vol"]), "SellVolStr": format_vol_km(cell["cum_sell_vol"]),
-                    "HasFreshNews": has_fresh_news, "FloatNum": f, "RvolNum": rvol_calc
+                    "HasFreshNews": has_fresh_news, "FloatNum": f, "RvolNum": daily_rvol_num
                 }
 
                 t_all.append(item)
                 if is_hod_break: feed_hod.insert(0, item)
                 
-                # 送入短線動能追蹤表
-                if sniper_triggered_this_tick or (cell["streak"] >= 2 and is_hod_break and curr_vol_delta > surge_vol_threshold):
+                if sniper_triggered_this_tick or (cell["streak"] >= 2 and is_hod_break and vol_1m > surge_vol_threshold):
                     if not sniper_triggered_this_tick: item["Streak"] = "⚡極速(9EMA)"
                     feed_surge.insert(0, item)
 
@@ -527,7 +527,7 @@ def scanner_engine():
                     
                 cell["HOD_str"] = f"${cell['HOD']:.2f}"
                 cell["last_price"] = p_num
-                cell["RVOL"] = item["RVOL"]
+                cell["RVOL"] = daily_rvol_str
                 cell["FloatStr"] = float_str
                 
                 config.MASTER_BRAIN["details"][sym] = cell
