@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16.2 - 流動性守護者版</title>
+    <title>ROSS Sniper V16.3 - 流動性守護者版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         
@@ -214,7 +214,7 @@
             container.scrollTop = oldScrollTop;
         }
 
-        // 🎨 戰情室專屬顏色判斷邏輯 (V16.2 雙鎖超時版)
+        // 🎨 戰情室專屬顏色判斷邏輯 
         function getActionRowStyle(row) {
             if (row.HasFreshNews) {
                 return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.25) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
@@ -255,7 +255,7 @@
             fetch('/data?t=' + ts)
                 .then(r => r.json())
                 .then(d => {
-                    document.getElementById('sys-status').innerHTML = `🟢 V16.2 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
+                    document.getElementById('sys-status').innerHTML = `🟢 V16.3 已連線 | 更新: ${d.last_update} | 掃描次數: ${d.scan_count}`;
                     document.getElementById('sys-status').style.backgroundColor = 'rgba(13, 17, 23, 0.8)';
                     document.getElementById('sys-status').style.color = '#3fb950';
 
@@ -278,12 +278,12 @@
                     lastKnownHodData = d.hod;
                     renderHOD(d.hod);
 
-                    // 🚨 V16.2: 短線動能追蹤 加入 Volume(總量) 與 RVOL(量比)，隱藏 ChangeAmt 騰出空間
+                    // 🚨 短線動能追蹤表：移除淨買量，改為直擊靈魂的「浮動股 (FloatStr)」
                     renderTable('surge-list', d.surge, [
                         {n:'時間', k:'Time', w:'9%'}, {n:'代碼', k:'Code', w:'11%'},
                         {n:'價格', k:'Price', w:'11%'}, {n:'漲跌%', k:'Change', w:'11%'},
                         {n:'總量', k:'Volume', w:'13%'}, {n:'量比', k:'RVOL', w:'11%'},
-                        {n:'🎯訊號', k:'Streak', w:'22%'}, {n:'淨買量', k:'NetVolStr', w:'12%'}
+                        {n:'🎯訊號', k:'Streak', w:'24%'}, {n:'浮動股', k:'FloatStr', w:'10%'}
                     ], getActionRowStyle);
 
                     renderTable('news-score-list', d.news_leaders, [
