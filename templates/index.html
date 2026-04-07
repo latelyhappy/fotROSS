@@ -109,15 +109,77 @@
         function changeZoom(v) { currentZoom += v; document.body.style.transform = `scale(${currentZoom})`; }
         function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; document.getElementById('lock-btn').innerText = isGlobalLocked ? "🔒 鎖定中" : "🔓 解鎖視窗"; }
         
-        let dragged = null, offX, offY;
+        // ===== 下方是替換的拖曳與縮放核心邏輯 =====
+        let draggedWindow = null;
+        let resizedWindow = null;
+        let offsetX = 0, offsetY = 0, startWidth = 0, startHeight = 0, startX = 0, startY = 0;
+
         document.querySelectorAll('.title-bar').forEach(bar => {
-            bar.onmousedown = (e) => { if(isGlobalLocked) return; dragged = bar.parentElement; offX = (e.clientX - dragged.offsetLeft) / currentZoom; offY = (e.clientY - dragged.offsetTop) / currentZoom; };
+            bar.addEventListener('mousedown', e => {
+                if (isGlobalLocked || e.target.tagName.toLowerCase() === 'BUTTON') return;
+                draggedWindow = bar.parentElement;
+                draggedWindow.style.zIndex = 100; // 拖曳時置頂
+                const rect = draggedWindow.getBoundingClientRect();
+                offsetX = (e.clientX - rect.left) / currentZoom;
+                offsetY = (e.clientY - rect.top) / currentZoom;
+            });
         });
-        document.onmousemove = (e) => { if(dragged) { dragged.style.left = (e.clientX / currentZoom - offX) + 'px'; dragged.style.top = (e.clientY / currentZoom - offY) + 'px'; } };
-        document.onmouseup = () => { if(dragged) { saveLayout(); dragged = null; } };
-        
-        function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('rossLayoutV16', JSON.stringify(layout)); }
-        function loadLayout() { const saved = localStorage.getItem('rossLayoutV16'); if (saved) { const layout = JSON.parse(saved); for (const [id, rect] of Object.entries(layout)) { const win = document.getElementById(id); if (win) { win.style.top = rect.top; win.style.left = rect.left; win.style.width = rect.width; win.style.height = rect.height; } } } }
+
+        document.querySelectorAll('.resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', e => {
+                if (isGlobalLocked) return;
+                resizedWindow = handle.parentElement;
+                resizedWindow.style.zIndex = 100;
+                const rect = resizedWindow.getBoundingClientRect();
+                startWidth = rect.width / currentZoom;
+                startHeight = rect.height / currentZoom;
+                startX = e.clientX / currentZoom;
+                startY = e.clientY / currentZoom;
+                e.stopPropagation();
+            });
+        });
+
+        document.addEventListener('mousemove', e => {
+            if (draggedWindow) {
+                let newX = (e.clientX / currentZoom) - offsetX;
+                let newY = (e.clientY / currentZoom) - offsetY;
+                draggedWindow.style.left = newX + 'px';
+                draggedWindow.style.top = newY + 'px';
+            }
+            if (resizedWindow) {
+                let newWidth = startWidth + (e.clientX / currentZoom - startX);
+                let newHeight = startHeight + (e.clientY / currentZoom - startY);
+                resizedWindow.style.width = newWidth + 'px';
+                resizedWindow.style.height = newHeight + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (draggedWindow) { draggedWindow.style.zIndex = 1; draggedWindow = null; saveLayout(); }
+            if (resizedWindow) { resizedWindow.style.zIndex = 1; resizedWindow = null; saveLayout(); }
+        });
+
+        function saveLayout() {
+            const layout = {};
+            document.querySelectorAll('.window').forEach(win => { 
+                layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; 
+            });
+            localStorage.setItem('rossLayoutV16', JSON.stringify(layout));
+        }
+
+        function loadLayout() {
+            const saved = localStorage.getItem('rossLayoutV16');
+            if (saved) {
+                const layout = JSON.parse(saved);
+                for (const [id, rect] of Object.entries(layout)) {
+                    const win = document.getElementById(id);
+                    if (win) { 
+                        win.style.top = rect.top; win.style.left = rect.left; 
+                        win.style.width = rect.width; win.style.height = rect.height; 
+                    }
+                }
+            }
+        }
 
         window.onload = () => { loadLayout(); refresh(); };
     </script>
