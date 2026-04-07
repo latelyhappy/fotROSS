@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 
-# 🌟 執行緒池配置
 static_task_pool = ThreadPoolExecutor(max_workers=5)  
 news_task_pool = ThreadPoolExecutor(max_workers=10)   
 
@@ -20,7 +19,6 @@ def log_debug(ticker, msg):
     time_str = datetime.now(tz_tw).strftime('%H:%M:%S')
     print(f"[{time_str}] 🕵️‍♂️ [DEBUG {ticker}] {msg}", flush=True)
 
-# 🛡️ 破甲模式
 try:
     import cloudscraper
     scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
@@ -127,12 +125,12 @@ def fetch_tv_gainers():
         time.sleep(5)
 
 # ==========================================
-# ★ V16.4 Ross Pro 核心引擎
+# ★ V16.6 轉折覺醒引擎 (解決量比遺失與覆蓋 Bug)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     tz_ny = pytz.timezone('America/New_York')
-    print("🔥 啟動 V16.4 Ross Pro 完全體 (EMA 9/20 + VWAP + PMH + 轉折偵測)...", flush=True)
+    print("🔥 啟動 V16.6 轉折覺醒版 (記憶流動性 + 複合標籤 + 🎯 關鍵轉折偵測)...", flush=True)
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     count = 0
@@ -152,12 +150,10 @@ def scanner_engine():
                     s_df = df[sym].dropna() if isinstance(df.columns, pd.MultiIndex) else df.dropna()
                     if s_df.empty: continue
                     
-                    # 1. 基礎數據
                     p = float(s_df['Close'].iloc[-1])
                     v_1m = float(s_df['Volume'].iloc[-1])
                     h_1m = float(s_df['High'].iloc[-1])
                     
-                    # 2. VWAP 計算 (從美東 09:30 開始累積)
                     mkt_open_mask = s_df.index >= s_df.index[0].replace(hour=9, minute=30, second=0)
                     open_df = s_df[mkt_open_mask]
                     curr_vwap = 0
@@ -165,57 +161,69 @@ def scanner_engine():
                         vwap_series = (open_df['Close'] * open_df['Volume']).cumsum() / open_df['Volume'].cumsum()
                         curr_vwap = float(vwap_series.iloc[-1])
                     
-                    # 3. EMA 9 & EMA 20 (Ross 核心雙線)
                     ema9 = s_df['Close'].ewm(span=9, adjust=False).mean()
                     ema20 = s_df['Close'].ewm(span=20, adjust=False).mean()
                     e9, e20 = float(ema9.iloc[-1]), float(ema20.iloc[-1])
-                    e9_prev, e20_prev = float(ema9.iloc[-2]), float(ema20.iloc[-2])
+                    e9_prev, e20_prev = float(ema9.iloc[-2]) if len(ema9)>1 else e9, float(ema20.iloc[-2]) if len(ema20)>1 else e20
                     
-                    # 4. PMH (盤前高點)
                     pm_df = s_df[s_df.index < s_df.index[0].replace(hour=9, minute=30, second=0)]
                     pmh = float(pm_df['High'].max()) if not pm_df.empty else 0
                     
-                    # 5. 數據對接
-                    daily_v_num, daily_v_str, rvol_s, rvol_n, f_str, f_num = 0, "0K", "0.0x", 0, "0M", 0
+                    # 🚨 記憶細胞：避免 TV 排行榜變動導致量比與總量消失
+                    cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "last_p": p, "last_h": h_1m, "in_pb": False, "s_time": 0, "l_label": "", "s_vol_str": "0K", "s_vol_num": 0, "s_rvol": "0.0x", "s_float": "0M"})
+                    
                     for g in feed_gappers:
                         if g['Code'] == sym:
-                            daily_v_num, daily_v_str, rvol_s = g['vol_raw_daily'], g['Volume'], g['RVOL']
-                            rvol_n = float(rvol_s.replace('x',''))
-                            f_str = g['FloatStr']
-                            f_num = float(f_str.replace('M','')) * 1e6
+                            cell["s_vol_num"] = g['vol_raw_daily']
+                            cell["s_vol_str"] = g['Volume']
+                            cell["s_rvol"] = g['RVOL']
+                            cell["s_float"] = g['FloatStr']
                             break
+                            
+                    # 用 1分鐘K量 補足 TV 延遲
+                    cell["s_vol_num"] += v_1m
+                    daily_v_num = cell["s_vol_num"]
+                    daily_v_str = format_vol_km(daily_v_num) if cell["s_vol_str"] == "0K" else cell["s_vol_str"]
+                    rvol_s = cell["s_rvol"]
+                    f_str = cell["s_float"]
+                    try: rvol_n = float(rvol_s.replace('x',''))
+                    except: rvol_n = 0
 
-                    # 🚨 Ross Pro 判斷邏輯
-                    cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "last_p": p, "last_h": h_1m, "in_pb": False, "s_time": 0, "l_label": ""})
+                    # 🚨 組合標籤引擎 (解決 PMH 覆蓋問題)
+                    label_list = []
+                    trigger = False
                     
-                    label, trigger = "", False
-                    
-                    # (A) 瞬間成交量脈衝 (1分鐘量 > 前3分鐘平均 3 倍)
                     if len(s_df) >= 4:
                         avg_v_prev = s_df['Volume'].iloc[-4:-1].mean()
-                        if v_1m > avg_v_prev * 3 and v_1m > 10000: label, trigger = "⚡資金爆發", True
+                        if v_1m > avg_v_prev * 3 and v_1m > 10000: 
+                            label_list.append("⚡資金爆發")
+                            trigger = True
                     
-                    # (B) EMA 9/20 買入區間 + VWAP 多頭濾網
                     if p > curr_vwap and e9 > e9_prev and e20 > e20_prev:
-                        # 價格進入 EMA 9 與 20 之間的黃金緩衝區
-                        if e20 < p < (e9 + 0.1) and daily_v_num > 300000:
-                            label, trigger = "🚀EMA 9/20買區", True
+                        # 降低門檻測試：總量>10萬 即可亮燈 (適合盤前或剛開盤)
+                        if e20 < p < (e9 + 0.15) and daily_v_num > 100000:
+                            label_list.append("🚀EMA買區")
+                            trigger = True
                             cell["in_pb"] = True
                             
-                        # (C) 第一根 K 線新高 (回踩後的轉折點)
-                        if cell["in_pb"] and h_1m > s_df['High'].iloc[-2] and p > e9:
-                            label, trigger = "🎯第一根K新高", True
+                        # 🎯 關鍵轉折點：第一根 K 線新高
+                        if cell.get("in_pb") and h_1m > s_df['High'].iloc[-2] and p > e20:
+                            label_list.append("🎯關鍵轉折")
+                            trigger = True
                             cell["in_pb"] = False
                     
-                    # (D) PMH 壓力偵測
-                    if pmh > 0 and 0 < (pmh - p) < p * 0.005: label, trigger = "⛔PMH壓力近", True
+                    if pmh > 0 and 0 < (pmh - p) < p * 0.005: 
+                        label_list.append("⛔PMH壓")
+                        trigger = True
 
-                    # (E) HOD 突破
                     if p > cell["HOD"]: 
                         cell["HOD"] = p
-                        label, trigger = "⚠️爆量突破" if v_1m > surge_vol_threshold else "⭐破高", True
+                        label_list.insert(0, "⚠️爆量突破" if v_1m > 10000 else "⭐破高")
+                        trigger = True
 
-                    # 🚨 180秒超時註銷機制
+                    # 將所有收集到的訊號組合成字串
+                    label = " + ".join(label_list)
+
                     if trigger:
                         if cell["l_label"] != label:
                             cell["s_time"], cell["l_label"] = time.time(), label
@@ -231,7 +239,7 @@ def scanner_engine():
                         "Time": now_ny.strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}",
                         "Change": f"{(p-get_static(sym)[2])/get_static(sym)[2]*100:+.2f}%",
                         "Volume": daily_v_str, "vol_raw": daily_v_num, "RVOL": rvol_s, "RvolNum": rvol_n,
-                        "FloatStr": f_str, "FloatNum": f_num, "Streak": label,
+                        "FloatStr": f_str, "Streak": label,
                         "HasFreshNews": has_news, "HasCatalyst": has_catalyst, "NewsScore": len(cell["NewsList"])*10
                     }
                     t_all.append(item)
