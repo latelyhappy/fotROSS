@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16.4 - Ross Pro 完全體</title>
+    <title>ROSS Sniper V16.5 - 簡潔實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -11,25 +11,26 @@
         .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; bottom: 0; right: 0; cursor: se-resize; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { border-bottom: 1px solid #21262d; padding: 3px 2px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        th { color: #8b949e; position: sticky; top: 0; background: #0d1117; z-index: 2; }
+        th { color: #8b949e; position: sticky; top: 0; background: #0d1117; z-index: 2; font-weight: normal; }
         tr:hover { background-color: #161b22; cursor: pointer; }
         .sym { font-weight: bold; font-size: 12px; color: #58a6ff; cursor: pointer; text-decoration: underline; }
         .chg-pos { color: #3fb950; font-weight: bold; }
         .chg-neg { color: #f85149; font-weight: bold; }
         .news-title-link { text-decoration: none; color: #e6edf3; font-size: 14px; display: block; line-height: 1.4; }
+        
         #zoom-controls { position: fixed; top: 10px; right: 10px; z-index: 9999; display: flex; gap: 5px; }
-        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 4px 8px; cursor: pointer; border-radius: 4px; font-size: 11px; }
+        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 4px 10px; cursor: pointer; border-radius: 4px; font-size: 11px; }
         #sys-status { position: fixed; bottom: 10px; left: 10px; background: rgba(13, 17, 23, 0.8); border: 1px solid #30363d; padding: 5px 10px; border-radius: 4px; font-size: 11px; z-index: 9999; }
     </style>
 </head>
 <body>
     <div id="zoom-controls">
-        <button onclick="changeZoom(0.1)">🔍 +</button><button onclick="changeZoom(-0.1)">🔍 -</button>
-        <button id="lock-btn" onclick="toggleGlobalLock()">🔓 解鎖</button>
-        <button id="engine-btn" onclick="toggleEngineRun()">⏹️ 停止</button>
+        <button onclick="changeZoom(0.1)">🔍 放大</button>
+        <button onclick="changeZoom(-0.1)">🔍 縮小</button>
+        <button id="lock-btn" onclick="toggleGlobalLock()">🔓 解鎖視窗</button>
     </div>
     
-    <div class="window" id="win-gap" style="top:10px; left:10px; width:520px; height:280px;"><div class="title-bar">1. 盤前跳空榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:520px; height:280px;"><div class="title-bar">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-surge" style="top:10px; left:540px; width:560px; height:430px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (Ross Pro 狙擊)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-hod" style="top:450px; left:540px; width:560px; height:420px;"><div class="title-bar">2. 突破今日新高</div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     <div class="window" id="win-detail" style="top:590px; left:10px; width:520px; height:280px;"><div class="title-bar">📊 戰情與新聞分析</div><div class="content" id="detail-list"></div><div class="resize-handle"></div></div>
@@ -37,8 +38,9 @@
     <div id="sys-status">🔄 引擎連線中...</div>
 
     <script>
-        let currentZoom = 1.0, isGlobalLocked = false, isEngineRunning = true, brainDetailsCache = {}, activeSymbol = "";
+        let currentZoom = 1.0, isGlobalLocked = false, brainDetailsCache = {}, activeSymbol = "";
 
+        // 視覺渲染邏輯保持最優化
         function getActionRowStyle(row) {
             if (row.HasFreshNews) return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.2) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
             if (row.Streak) {
@@ -58,8 +60,10 @@
                 cols.forEach(c => {
                     let val = row[c.k] || '';
                     if (c.k === 'Code') val = `<span class="sym" ondblclick="window.open('https://www.tradingview.com/chart/?symbol=${val}')">${val}</span>${row.HasCatalyst ? ' 📰' : ''}`;
-                    if (c.k === 'Change' && val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
-                    if (c.k === 'Change' && val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
+                    if (c.k === 'Change' && typeof val === 'string') {
+                        if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
+                        else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
+                    }
                     if (c.k === 'FloatStr' && parseFloat(val) < 2) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`;
                     if (c.k === 'RVOL' && parseFloat(val) >= 10) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`;
                     html += `<td>${val}</td>`;
@@ -70,9 +74,8 @@
         }
 
         function refresh() {
-            if(!isEngineRunning) return;
             fetch('/data?t=' + Date.now()).then(r => r.json()).then(d => {
-                document.getElementById('sys-status').innerText = `🟢 V16.4 已連線 | 更新: ${d.last_update}`;
+                document.getElementById('sys-status').innerText = `🟢 V16.5 運行中 | 更新: ${d.last_update}`;
                 brainDetailsCache = d.details || {};
                 renderTable('gap-list', d.gappers, [{n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'}, {n:'漲跌%', k:'Change', w:'15%'}, {n:'量比', k:'RVOL', w:'15%'}, {n:'浮動股', k:'FloatStr', w:'15%'}]);
                 renderTable('surge-list', d.surge, [{n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'14%'}, {n:'總量', k:'Volume', w:'15%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'訊號', k:'Streak', w:'23%'}, {n:'浮動股', k:'FloatStr', w:'10%'}], getActionRowStyle);
@@ -85,27 +88,23 @@
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
             let news = (d.NewsList || []).map(n => `<div style="margin-bottom:8px;">[${n.time}] <a class="news-title-link" href="${n.link}" target="_blank">${n.title}</a></div>`).join('');
-            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:15px;"><div class="p-box">今日最高<br><b>${d.HOD}</b></div><div class="p-box">量比<br><b>${d.RVOL}</b></div><div class="p-box">浮動股<br><b>${d.FloatStr}</b></div></div>${news}`;
+            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:5px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:10px;"><div style="text-align:center;">今日最高<br><b>${d.HOD}</b></div><div style="text-align:center;">量比<br><b>${d.RVOL}</b></div><div style="text-align:center;">浮動股<br><b>${d.FloatStr}</b></div></div>${news}`;
         }
 
         function changeZoom(v) { currentZoom += v; document.body.style.transform = `scale(${currentZoom})`; }
-        function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; document.getElementById('lock-btn').innerText = isGlobalLocked ? "🔒 鎖定" : "🔓 解鎖"; }
-        window.onload = () => { loadLayout(); refresh(); };
-
-        // 拖曳邏輯 (省略重複部分，保持完整性)
-        let dragged = null, startX, startY, offX, offY;
+        function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; document.getElementById('lock-btn').innerText = isGlobalLocked ? "🔒 鎖定中" : "🔓 解鎖視窗"; }
+        
+        let dragged = null, offX, offY;
         document.querySelectorAll('.title-bar').forEach(bar => {
-            bar.onmousedown = (e) => {
-                if(isGlobalLocked) return;
-                dragged = bar.parentElement;
-                offX = (e.clientX - dragged.offsetLeft) / currentZoom;
-                offY = (e.clientY - dragged.offsetTop) / currentZoom;
-            };
+            bar.onmousedown = (e) => { if(isGlobalLocked) return; dragged = bar.parentElement; offX = (e.clientX - dragged.offsetLeft) / currentZoom; offY = (e.clientY - dragged.offsetTop) / currentZoom; };
         });
         document.onmousemove = (e) => { if(dragged) { dragged.style.left = (e.clientX / currentZoom - offX) + 'px'; dragged.style.top = (e.clientY / currentZoom - offY) + 'px'; } };
-        document.onmouseup = () => { if(dragged) saveLayout(); dragged = null; };
-        function saveLayout() { /* 保持 localStorage 保存功能 */ }
-        function loadLayout() { /* 保持 localStorage 載入功能 */ }
+        document.onmouseup = () => { if(dragged) { saveLayout(); dragged = null; } };
+        
+        function saveLayout() { const layout = {}; document.querySelectorAll('.window').forEach(win => { layout[win.id] = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height }; }); localStorage.setItem('rossLayoutV16', JSON.stringify(layout)); }
+        function loadLayout() { const saved = localStorage.getItem('rossLayoutV16'); if (saved) { const layout = JSON.parse(saved); for (const [id, rect] of Object.entries(layout)) { const win = document.getElementById(id); if (win) { win.style.top = rect.top; win.style.left = rect.left; win.style.width = rect.width; win.style.height = rect.height; } } } }
+
+        window.onload = () => { loadLayout(); refresh(); };
     </script>
 </body>
 </html>
