@@ -19,7 +19,6 @@ feed_gappers = []
 feed_surge = []
 feed_hod = []
 
-# 新聞關鍵字濾網
 CATALYST_KEYWORDS = ['FDA', 'MERGER', 'ACQUISITION', 'BUYOUT', 'EARNINGS', 'PATENT', 'PHASE', 'AGREEMENT', 'CONTRACT', 'PARTNERSHIP', 'TRIAL', 'CLEARANCE', 'APPROVAL', 'REVENUE', 'GUIDANCE', '收購', '財報', '臨床']
 
 def translate_to_zh(text):
@@ -113,7 +112,7 @@ def fetch_tv_gainers():
 def scanner_engine():
     global feed_surge, feed_hod
     tz_ny = pytz.timezone('America/New_York')
-    print("💎 V18.8 啟動 (新增新聞排行榜與 📰 圖示)...", flush=True)
+    print("💎 V18.9 啟動 (戰情分析數據修復 + 明確美東時間)...", flush=True)
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     count = 0
@@ -125,7 +124,7 @@ def scanner_engine():
             df = yf.download(symbols, period='1d', interval='1m', prepost=True, progress=False, timeout=15, group_by='ticker')
             
             now_ts = time.time()
-            t_news_rank = [] # 用來存新聞排行榜的陣列
+            t_news_rank = [] 
             
             for sym in symbols:
                 try:
@@ -156,6 +155,18 @@ def scanner_engine():
                     pmh = float(pm_df['High'].max()) if not pm_df.empty else 0
                     
                     cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "in_pb": False, "s_time": 0, "l_label": "", "tr_hist": [], "comp_count": 0, "peak": h_1m})
+                    
+                    # 🚨 修復：將最新的數據寫回 cell，讓右下角戰情分析視窗能正確抓取
+                    chg_str = f"{(p-prev_c)/prev_c*100:+.2f}%" if prev_c > 0 else "0.00%"
+                    vol_str = format_vol_km(daily_v)
+                    rvol_str = f"{daily_v/a:.1f}x" if a > 1 else "計算中"
+                    float_str = f"{f/1e6:.1f}M" if f > 1 else "計算中"
+                    
+                    cell["Price"] = f"${p:.2f}"
+                    cell["Change"] = chg_str
+                    cell["Volume"] = vol_str
+                    cell["RVOL"] = rvol_str
+                    cell["FloatStr"] = float_str
                     
                     tr = max(h_1m - l_1m, abs(h_1m - s_df['Close'].iloc[-2]), abs(l_1m - s_df['Close'].iloc[-2]))
                     cell["tr_hist"].append(tr)
@@ -201,31 +212,36 @@ def scanner_engine():
                         if (now_ts - cell["s_time"]) > 180 and h_1m <= cell["peak"]:
                             label_list.append("⏱️動能停滯")
 
-                    # 🚨 新聞圖示與排行榜邏輯
                     has_fresh_news = any(n.get("pub_ts",0) > (now_ts-600) for n in cell["NewsList"])
                     has_catalyst = any(any(kw in n.get("raw_title", "").upper() for kw in CATALYST_KEYWORDS) for n in cell["NewsList"])
                     news_score = sum(1 for n in cell["NewsList"] if n.get("is_today")) * 10 + (50 if has_catalyst else 0)
 
                     item = {
                         "Time": datetime.now(tz_ny).strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}", 
-                        "Change": f"{(p-prev_c)/prev_c*100:+.2f}%" if prev_c>0 else "0.00%", 
-                        "Volume": format_vol_km(daily_v), "RVOL": f"{daily_v/a:.1f}x" if a > 1 else "計算中", 
-                        "FloatStr": f"{f/1e6:.1f}M" if f > 1 else "計算中", "Streak": " + ".join(label_list), 
+                        "Change": chg_str, "Volume": vol_str, "RVOL": rvol_str, 
+                        "FloatStr": float_str, "Streak": " + ".join(label_list), 
                         "HasFreshNews": has_fresh_news, "HasCatalyst": has_catalyst, "NewsScore": news_score
                     }
                     
                     if trigger: feed_surge.insert(0, item)
                     if is_hod: feed_hod.insert(0, item) 
-                    if news_score > 0: t_news_rank.append(item) # 有新聞就加入排行榜
+                    if news_score > 0: t_news_rank.append(item)
                     
                     if count % 25 == 0: news_task_pool.submit(fetch_direct_news_bg, sym, cell)
                 except Exception as e: pass
             
             feed_surge = feed_surge[:100]
             feed_hod = feed_hod[:50]
-            t_news_rank = sorted(t_news_rank, key=lambda x: x["NewsScore"], reverse=True)[:30] # 依熱度排序
             
-            config.MASTER_BRAIN.update({"gappers": feed_gappers[:40], "surge": feed_surge, "hod": feed_hod, "news_rank": t_news_rank, "last_update": datetime.now(tz_ny).strftime('%H:%M:%S')})
+            # 過濾掉新聞排行榜中重複的代碼
+            seen = set()
+            unique_news_rank = []
+            for item in sorted(t_news_rank, key=lambda x: x["NewsScore"], reverse=True):
+                if item["Code"] not in seen:
+                    unique_news_rank.append(item)
+                    seen.add(item["Code"])
+            
+            config.MASTER_BRAIN.update({"gappers": feed_gappers[:40], "surge": feed_surge, "hod": feed_hod, "news_rank": unique_news_rank[:30], "last_update": datetime.now(tz_ny).strftime('%H:%M:%S')})
             count += 1
             time.sleep(4)
         except: time.sleep(5)
