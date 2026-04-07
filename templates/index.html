@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V16.5 - 簡潔實戰版</title>
+    <title>ROSS Sniper V16.7 - 終極實戰版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; overflow-y: auto; height: 150vh; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; box-shadow: 0 5px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; z-index: 1; }
@@ -40,17 +40,21 @@
     <script>
         let currentZoom = 1.0, isGlobalLocked = false, brainDetailsCache = {}, activeSymbol = "";
 
-        // 視覺渲染邏輯保持最優化
+        // 🎨 終極視覺同步：背景色判斷
         function getActionRowStyle(row) {
             if (row.HasFreshNews) return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.2) 0%, rgba(88,166,255,0.05) 100%); border-left: 3px solid #58a6ff;"';
             if (row.Streak) {
-                if (row.Streak.includes('EMA') || row.Streak.includes('第一根')) return 'style="background: rgba(255, 234, 0, 0.12); border-left: 3px solid #ffea00;"';
+                // 賣出停損區 (危險紅色)
+                if (row.Streak.includes('跌破') || row.Streak.includes('⛔')) return 'style="background:rgba(248, 81, 73, 0.15); border-left: 3px solid #f85149;"';
+                // 準備進場區 (黃金底色)
+                if (row.Streak.includes('EMA') || row.Streak.includes('轉折')) return 'style="background: rgba(255, 234, 0, 0.12); border-left: 3px solid #ffea00;"';
+                // 資金爆發區 (紫色底色)
                 if (row.Streak.includes('⚡') || row.Streak.includes('突破') || row.Streak.includes('⭐')) return 'style="background:rgba(156, 39, 176, 0.15); border-left: 3px solid #d2a8ff;"';
-                if (row.Streak.includes('⛔')) return 'style="background:rgba(248, 81, 73, 0.1); border-left: 3px solid #f85149;"';
             }
             return '';
         }
 
+        // 🎨 終極視覺同步：字體顏色判斷
         function renderTable(id, data, cols, styleFunc=null) {
             const container = document.getElementById(id);
             if (!container) return;
@@ -66,6 +70,14 @@
                     }
                     if (c.k === 'FloatStr' && parseFloat(val) < 2) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`;
                     if (c.k === 'RVOL' && parseFloat(val) >= 10) val = `<span style="color:#ff4500; font-weight:bold;">🔥 ${val}</span>`;
+                    
+                    // 同步新標籤字體顏色
+                    if (c.k === 'Streak') {
+                        if (val.includes('跌破') || val.includes('⛔')) val = `<span style="color:#f85149; font-weight:bold;">${val}</span>`;
+                        else if (val.includes('EMA') || val.includes('轉折')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`; 
+                        else if (val.includes('爆發') || val.includes('突破') || val.includes('⭐')) val = `<span style="color:#d2a8ff; font-weight:900;">${val}</span>`; 
+                    }
+                    
                     html += `<td>${val}</td>`;
                 });
                 html += `</tr>`;
@@ -75,11 +87,11 @@
 
         function refresh() {
             fetch('/data?t=' + Date.now()).then(r => r.json()).then(d => {
-                document.getElementById('sys-status').innerText = `🟢 V16.5 運行中 | 更新: ${d.last_update}`;
+                document.getElementById('sys-status').innerText = `🟢 V16.7 運行中 | 更新: ${d.last_update}`;
                 brainDetailsCache = d.details || {};
                 renderTable('gap-list', d.gappers, [{n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'}, {n:'漲跌%', k:'Change', w:'15%'}, {n:'量比', k:'RVOL', w:'15%'}, {n:'浮動股', k:'FloatStr', w:'15%'}]);
-                renderTable('surge-list', d.surge, [{n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'14%'}, {n:'總量', k:'Volume', w:'15%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'訊號', k:'Streak', w:'23%'}, {n:'浮動股', k:'FloatStr', w:'10%'}], getActionRowStyle);
-                renderTable('hod-list', d.hod, [{n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'}, {n:'訊號', k:'Streak', w:'25%'}, {n:'總量', k:'Volume', w:'18%'}, {n:'浮動股', k:'FloatStr', w:'15%'}], getActionRowStyle);
+                renderTable('surge-list', d.surge, [{n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'14%'}, {n:'總量', k:'Volume', w:'15%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'買賣訊號', k:'Streak', w:'23%'}, {n:'浮動股', k:'FloatStr', w:'10%'}], getActionRowStyle);
+                renderTable('hod-list', d.hod, [{n:'時間', k:'Time', w:'12%'}, {n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'}, {n:'買賣訊號', k:'Streak', w:'25%'}, {n:'總量', k:'Volume', w:'18%'}, {n:'浮動股', k:'FloatStr', w:'15%'}], getActionRowStyle);
                 if(activeSymbol) loadDetail(activeSymbol);
                 setTimeout(refresh, 3000);
             });
@@ -87,7 +99,10 @@
 
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
-            let news = (d.NewsList || []).map(n => `<div style="margin-bottom:8px;">[${n.time}] <a class="news-title-link" href="${n.link}" target="_blank">${n.title}</a></div>`).join('');
+            let news = (d.NewsList || []).map(n => {
+                let timeStyle = n.is_today ? 'color:#ffa500; font-weight:bold;' : 'color:#8b949e;';
+                return `<div style="margin-bottom:8px;"> <span style="${timeStyle} font-size:12px; margin-right:5px;">[${n.time}]</span> <a class="news-title-link" href="${n.link}" target="_blank" style="display:inline; font-size:13px;">${n.title}</a></div>`;
+            }).join('');
             document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:5px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:10px;"><div style="text-align:center;">今日最高<br><b>${d.HOD}</b></div><div style="text-align:center;">量比<br><b>${d.RVOL}</b></div><div style="text-align:center;">浮動股<br><b>${d.FloatStr}</b></div></div>${news}`;
         }
 
