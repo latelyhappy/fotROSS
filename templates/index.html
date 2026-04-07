@@ -2,48 +2,112 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V18.1 - 數據穩定版</title>
+    <title>ROSS Sniper V18.5 - 大滿貫完全版</title>
     <style>
-        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow-x: hidden; transform-origin: top left; }
-        .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; }
-        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 6px 10px; font-size: 11px; font-weight: bold; cursor: grab; border-bottom: 1px solid #30363d; }
+        body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
+        .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.8); z-index: 1; }
+        .title-bar { background: #0d1f3d !important; color: #ffffff !important; padding: 6px 10px; font-size: 11px; font-weight: bold; cursor: grab; border-bottom: 1px solid #30363d; user-select: none; }
         .content { flex: 1; padding: 4px; overflow-y: auto; font-size: 10.5px; }
+        .resize-handle { width: 12px; height: 12px; background: linear-gradient(135deg, transparent 50%, #8b949e 50%); position: absolute; bottom: 0; right: 0; cursor: se-resize; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { border-bottom: 1px solid #21262d; padding: 4px 2px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        th { color: #8b949e; background: #0d1117; position: sticky; top: 0; }
+        th { color: #8b949e; background: #0d1117; position: sticky; top: 0; z-index: 2; }
+        tr:hover { background-color: #161b22; cursor: pointer; }
         .sym { font-weight: bold; font-size: 12px; color: #58a6ff; cursor: pointer; text-decoration: underline; }
-        #sys-status { position: fixed; bottom: 10px; left: 10px; background: rgba(13, 17, 23, 0.8); border: 1px solid #30363d; padding: 5px 10px; border-radius: 4px; font-size: 11px; z-index: 9999; }
+        .chg-pos { color: #3fb950; font-weight: bold; }
+        .chg-neg { color: #f85149; font-weight: bold; }
+        #zoom-controls { position: fixed; top: 10px; right: 10px; z-index: 9999; display: flex; gap: 5px; }
+        #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 11px; }
+        #sys-status { position: fixed; bottom: 10px; left: 10px; background: rgba(13,17,23,0.8); border: 1px solid #30363d; padding: 5px 10px; border-radius: 4px; font-size: 11px; z-index: 9999; }
     </style>
 </head>
 <body>
-    <div class="window" id="win-surge" style="top:10px; left:10px; width:560px; height:600px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.1 修復版)</div><div class="content" id="surge-list"></div></div>
-    <div class="window" id="win-detail" style="top:10px; left:580px; width:460px; height:600px;"><div class="title-bar">📊 戰情分析與即時新聞</div><div class="content" id="detail-list"></div></div>
-    <div id="sys-status">🔄 數據源修復中...</div>
+    <div id="zoom-controls">
+        <button onclick="changeZoom(0.1)">🔍 放大</button>
+        <button onclick="changeZoom(-0.1)">🔍 縮小</button>
+        <button id="lock-btn" onclick="toggleGlobalLock()">🔓 解鎖視窗</button>
+    </div>
+    
+    <div class="window" id="win-gap" style="top:10px; left:10px; width:520px; height:280px;"><div class="title-bar">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:540px; width:560px; height:580px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.5 Sniper Pro)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-detail" style="top:300px; left:10px; width:520px; height:430px;"><div class="title-bar">📊 戰情分析與新聞</div><div class="content" id="detail-list"></div><div class="resize-handle"></div></div>
+
+    <div id="sys-status">🔄 引擎連線中...</div>
 
     <script>
-        let brainDetailsCache = {}, activeSymbol = "";
+        let currentZoom = 1.0, isGlobalLocked = false, brainDetailsCache = {}, activeSymbol = "";
+
+        function getActionRowStyle(row) {
+            if (row.HasFreshNews) return 'style="background: linear-gradient(90deg, rgba(88,166,255,0.15) 0%, transparent 100%); border-left: 4px solid #58a6ff;"';
+            if (row.Streak) {
+                if (row.Streak.includes('🔴') || row.Streak.includes('🚨')) return 'style="background: rgba(248, 81, 73, 0.2); border-left: 5px solid #f85149;"';
+                if (row.Streak.includes('🟡') || row.Streak.includes('⏱️')) return 'style="background: rgba(255, 165, 0, 0.15); border-left: 5px solid #ffa500;"';
+                if (row.Streak.includes('🚀') || row.Streak.includes('🎯') || row.Streak.includes('🔥')) return 'style="background: rgba(255, 234, 0, 0.12); border-left: 5px solid #ffea00;"';
+                if (row.Streak.includes('⚡') || row.Streak.includes('⭐')) return 'style="background: rgba(156, 39, 176, 0.2); border-left: 5px solid #d2a8ff;"';
+            }
+            return '';
+        }
+
+        function renderTable(id, data, cols, styleFunc=null) {
+            const container = document.getElementById(id);
+            if (!container) return;
+            let html = `<table><thead><tr>${cols.map(c => `<th style="width:${c.w}">${c.n}</th>`).join('')}</tr></thead><tbody>`;
+            data.forEach(row => {
+                html += `<tr ${styleFunc ? styleFunc(row) : ''} onclick="loadDetail('${row.Code}')">`;
+                cols.forEach(c => {
+                    let val = row[c.k] || '';
+                    if (c.k === 'Code') val = `<span class="sym" ondblclick="window.open('https://www.tradingview.com/chart/?symbol=${val}')">${val}</span>`;
+                    if (c.k === 'Change' && typeof val === 'string') {
+                        if (val.includes('+')) val = `<span class="chg-pos">${val}</span>`;
+                        else if (val.includes('-')) val = `<span class="chg-neg">${val}</span>`;
+                    }
+                    if (c.k === 'FloatStr' && parseFloat(val) < 2) val = `<span style="color:#d2a8ff; font-weight:bold;">${val}</span>`;
+                    if (c.k === 'Streak') {
+                        if (val.includes('🎯') || val.includes('🚀') || val.includes('🔥')) val = `<span style="color:#f2cc60; font-weight:900;">${val}</span>`;
+                        else if (val.includes('🚨') || val.includes('🔴')) val = `<span style="color:#f85149; font-weight:bold;">${val}</span>`;
+                    }
+                    html += `<td>${val}</td>`;
+                });
+                html += `</tr>`;
+            });
+            container.innerHTML = html + `</tbody></table>`;
+        }
 
         function refresh() {
             fetch('/data?t=' + Date.now()).then(r => r.json()).then(d => {
-                document.getElementById('sys-status').innerText = `🟢 V18.1 連線正常 | 更新: ${d.last_update}`;
+                document.getElementById('sys-status').innerText = `🟢 V18.5 已連線 | 更新: ${d.last_update}`;
                 brainDetailsCache = d.details || {};
-                const surge = d.surge || [];
-                let html = '<table><thead><tr><th>代碼</th><th>價格</th><th>量比</th><th>戰術標籤</th><th>浮動</th></tr></thead><tbody>';
-                surge.forEach(row => {
-                    html += `<tr><td><span class="sym" onclick="loadDetail('${row.Code}')">${row.Code}</span></td><td>${row.Price}</td><td>${row.RVOL}</td><td style="color:#f2cc60; font-weight:bold;">${row.Streak}</td><td>${row.FloatStr}</td></tr>`;
-                });
-                document.getElementById('surge-list').innerHTML = html + '</tbody></table>';
+                renderTable('gap-list', d.gappers, [{n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'18%'}, {n:'漲跌%', k:'Change', w:'18%'}, {n:'量比', k:'RVOL', w:'18%'}, {n:'浮動股', k:'FloatStr', w:'15%'}]);
+                renderTable('surge-list', d.surge, [{n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'14%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'戰術標籤', k:'Streak', w:'45%'}, {n:'浮動', k:'FloatStr', w:'15%'}], getActionRowStyle);
                 if(activeSymbol) loadDetail(activeSymbol);
-                setTimeout(refresh, 4000);
+                setTimeout(refresh, 3500);
             });
         }
 
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
-            let news = (d.NewsList || []).map(n => `<div style="margin-bottom:8px;"><span style="color:${n.is_today?'#ffa500':'#8b949e'};">[${n.time}]</span> <a href="${n.link}" target="_blank" style="color:#e6edf3; text-decoration:none;">${n.title}</a></div>`).join('');
-            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center;">${sym}</h2><div style="display:flex; justify-content:space-around;"><div>今日高: ${d.HOD}</div></div><hr>${news}`;
+            let news = (d.NewsList || []).map(n => `<div style="margin-bottom:8px;"><span style="color:${n.is_today?'#ffa500':'#8b949e'}; font-weight:bold;">[${n.time}]</span> <a href="${n.link}" target="_blank" style="color:#e6edf3; text-decoration:none; font-size:13px;">${n.title}</a></div>`).join('');
+            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:5px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:10px;"><div>今日最高: <b>${d.HOD}</b></div></div>${news}`;
         }
-        window.onload = refresh;
+
+        function changeZoom(v) { currentZoom += v; document.body.style.transform = `scale(${currentZoom})`; }
+        function toggleGlobalLock() { isGlobalLocked = !isGlobalLocked; document.getElementById('lock-btn').innerText = isGlobalLocked ? "🔒 鎖定" : "🔓 解鎖視窗"; }
+        
+        let draggedW = null, resizedW = null, offsetX, offsetY, startW, startH, startX, startY;
+        document.querySelectorAll('.title-bar').forEach(bar => {
+            bar.onmousedown = (e) => { if(isGlobalLocked) return; draggedW = bar.parentElement; const r = draggedW.getBoundingClientRect(); offsetX = (e.clientX-r.left)/currentZoom; offsetY = (e.clientY-r.top)/currentZoom; draggedW.style.zIndex=100; };
+        });
+        document.querySelectorAll('.resize-handle').forEach(h => {
+            h.onmousedown = (e) => { if(isGlobalLocked) return; resizedW = h.parentElement; const r = resizedW.getBoundingClientRect(); startW=r.width/currentZoom; startH=r.height/currentZoom; startX=e.clientX/currentZoom; startY=e.clientY/currentZoom; e.stopPropagation(); };
+        });
+        document.onmousemove = (e) => {
+            if(draggedW) { draggedW.style.left = (e.clientX/currentZoom-offsetX)+'px'; draggedW.style.top = (e.clientY/currentZoom-offsetY)+'px'; }
+            if(resizedW) { resizedW.style.width = (startW+(e.clientX/currentZoom-startX))+'px'; resizedW.style.height = (startH+(e.clientY/currentZoom-startY))+'px'; }
+        };
+        document.onmouseup = () => { if(draggedW||resizedW) saveLayout(); draggedW = resizedW = null; };
+        function saveLayout() { const layout={}; document.querySelectorAll('.window').forEach(w=>{ layout[w.id]={top:w.style.top, left:w.style.left, width:w.style.width, height:w.style.height}; }); localStorage.setItem('rossLayoutV16', JSON.stringify(layout)); }
+        function loadLayout() { const s=localStorage.getItem('rossLayoutV16'); if(s){ const l=JSON.parse(s); for(const id in l){ const w=document.getElementById(id); if(w){ w.style.top=l[id].top; w.style.left=l[id].left; w.style.width=l[id].width; w.style.height=l[id].height; }}} }
+        window.onload = () => { loadLayout(); refresh(); };
     </script>
 </body>
 </html>
