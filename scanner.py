@@ -58,10 +58,27 @@ def fetch_direct_news_bg(ticker, cell):
             pub_ts = item.get('providerPublishTime')
             if not raw_title or not pub_ts or raw_title in cell["raw_news_titles"]: continue
             pub_dt = datetime.fromtimestamp(pub_ts, tz_ny)
+            
+            # 丟棄超過 4 天的新聞
             if (now_ny.date() - pub_dt.date()).days > 4: continue 
+            
             translated_title = translate_to_zh(raw_title)
             cell["raw_news_titles"].append(raw_title)
-            new_articles.append({"id": str(random.randint(10000, 99999)), "title": translated_title, "score": 0, "link": item.get('link', ''), "time": pub_dt.strftime("%H:%M"), "is_today": (pub_dt.date() == now_ny.date()), "is_read": False, "pub_ts": pub_ts})
+            
+            # 🚨 修復新聞時間格式：如果是今天，只顯示時間；否則顯示 月-日 時間。
+            is_today_flag = (pub_dt.date() == now_ny.date())
+            time_str = pub_dt.strftime("%H:%M") if is_today_flag else pub_dt.strftime("%m-%d %H:%M")
+            
+            new_articles.append({
+                "id": str(random.randint(10000, 99999)), 
+                "title": translated_title, "score": 0, 
+                "link": item.get('link', ''), 
+                "time": time_str, 
+                "is_today": is_today_flag, 
+                "is_read": False, "pub_ts": pub_ts
+            })
+            if len(new_articles) >= 5: break
+            
         if new_articles:
             clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
             cell["NewsList"] = (new_articles + clean_old_list)[:5]
@@ -125,12 +142,12 @@ def fetch_tv_gainers():
         time.sleep(5)
 
 # ==========================================
-# ★ V16.6 轉折覺醒引擎 (解決量比遺失與覆蓋 Bug)
+# ★ V16.7 終極戰情引擎 (加入賣出/停損點)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     tz_ny = pytz.timezone('America/New_York')
-    print("🔥 啟動 V16.6 轉折覺醒版 (記憶流動性 + 複合標籤 + 🎯 關鍵轉折偵測)...", flush=True)
+    print("🔥 啟動 V16.7 (包含買賣點與停損防護網)...", flush=True)
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     count = 0
@@ -164,12 +181,12 @@ def scanner_engine():
                     ema9 = s_df['Close'].ewm(span=9, adjust=False).mean()
                     ema20 = s_df['Close'].ewm(span=20, adjust=False).mean()
                     e9, e20 = float(ema9.iloc[-1]), float(ema20.iloc[-1])
-                    e9_prev, e20_prev = float(ema9.iloc[-2]) if len(ema9)>1 else e9, float(ema20.iloc[-2]) if len(ema20)>1 else e20
+                    e9_prev = float(ema9.iloc[-2]) if len(ema9)>1 else e9
+                    e20_prev = float(ema20.iloc[-2]) if len(ema20)>1 else e20
                     
                     pm_df = s_df[s_df.index < s_df.index[0].replace(hour=9, minute=30, second=0)]
                     pmh = float(pm_df['High'].max()) if not pm_df.empty else 0
                     
-                    # 🚨 記憶細胞：避免 TV 排行榜變動導致量比與總量消失
                     cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "last_p": p, "last_h": h_1m, "in_pb": False, "s_time": 0, "l_label": "", "s_vol_str": "0K", "s_vol_num": 0, "s_rvol": "0.0x", "s_float": "0M"})
                     
                     for g in feed_gappers:
@@ -180,7 +197,6 @@ def scanner_engine():
                             cell["s_float"] = g['FloatStr']
                             break
                             
-                    # 用 1分鐘K量 補足 TV 延遲
                     cell["s_vol_num"] += v_1m
                     daily_v_num = cell["s_vol_num"]
                     daily_v_str = format_vol_km(daily_v_num) if cell["s_vol_str"] == "0K" else cell["s_vol_str"]
@@ -189,39 +205,48 @@ def scanner_engine():
                     try: rvol_n = float(rvol_s.replace('x',''))
                     except: rvol_n = 0
 
-                    # 🚨 組合標籤引擎 (解決 PMH 覆蓋問題)
                     label_list = []
                     trigger = False
                     
+                    # (A) 買入訊號：瞬間資金爆發
                     if len(s_df) >= 4:
                         avg_v_prev = s_df['Volume'].iloc[-4:-1].mean()
                         if v_1m > avg_v_prev * 3 and v_1m > 10000: 
                             label_list.append("⚡資金爆發")
                             trigger = True
                     
+                    # (B) 買入區間：EMA 買區
                     if p > curr_vwap and e9 > e9_prev and e20 > e20_prev:
-                        # 降低門檻測試：總量>10萬 即可亮燈 (適合盤前或剛開盤)
                         if e20 < p < (e9 + 0.15) and daily_v_num > 100000:
                             label_list.append("🚀EMA買區")
                             trigger = True
                             cell["in_pb"] = True
                             
-                        # 🎯 關鍵轉折點：第一根 K 線新高
+                        # (C) 確定買點：第一根 K 線新高
                         if cell.get("in_pb") and h_1m > s_df['High'].iloc[-2] and p > e20:
                             label_list.append("🎯關鍵轉折")
                             trigger = True
                             cell["in_pb"] = False
                     
-                    if pmh > 0 and 0 < (pmh - p) < p * 0.005: 
-                        label_list.append("⛔PMH壓")
-                        trigger = True
-
+                    # (D) 追高買點：HOD 突破
                     if p > cell["HOD"]: 
                         cell["HOD"] = p
                         label_list.insert(0, "⚠️爆量突破" if v_1m > 10000 else "⭐破高")
                         trigger = True
 
-                    # 將所有收集到的訊號組合成字串
+                    # 🚨 賣出點與防護網 🚨
+                    # (E) 賣出點 (獲利)：PMH 壓力偵測
+                    if pmh > 0 and 0 < (pmh - p) < p * 0.005: 
+                        label_list.append("⛔PMH壓")
+                        trigger = True
+                        
+                    # (F) 賣出點 (停損)：剛剛跌破 EMA 20 生命線
+                    prev_close = float(s_df['Close'].iloc[-2]) if len(s_df) > 1 else p
+                    if p < e20 and prev_close >= e20_prev:
+                        label_list.append("🚨跌破20均")
+                        trigger = True
+                        cell["in_pb"] = False # 重置買入區間
+
                     label = " + ".join(label_list)
 
                     if trigger:
