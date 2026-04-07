@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V18.5 - 大滿貫完全版</title>
+    <title>ROSS Sniper V18.6 - 滿血復活版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.8); z-index: 1; }
@@ -29,8 +29,12 @@
     </div>
     
     <div class="window" id="win-gap" style="top:10px; left:10px; width:520px; height:280px;"><div class="title-bar">1. 盤前跳空漲幅榜</div><div class="content" id="gap-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-surge" style="top:10px; left:540px; width:560px; height:580px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.5 Sniper Pro)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
-    <div class="window" id="win-detail" style="top:300px; left:10px; width:520px; height:430px;"><div class="title-bar">📊 戰情分析與新聞</div><div class="content" id="detail-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-surge" style="top:10px; left:540px; width:560px; height:430px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.6 Sniper Ultra)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-hod" style="top:450px; left:540px; width:560px; height:320px;"><div class="title-bar">2. 突破今日新高</div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
+    
+    <div class="window" id="win-detail" style="top:300px; left:10px; width:520px; height:470px;"><div class="title-bar">📊 戰情分析與新聞</div><div class="content" id="detail-list"></div><div class="resize-handle"></div></div>
 
     <div id="sys-status">🔄 引擎連線中...</div>
 
@@ -75,10 +79,17 @@
 
         function refresh() {
             fetch('/data?t=' + Date.now()).then(r => r.json()).then(d => {
-                document.getElementById('sys-status').innerText = `🟢 V18.5 已連線 | 更新: ${d.last_update}`;
+                document.getElementById('sys-status').innerText = `🟢 V18.6 已連線 | 更新: ${d.last_update}`;
                 brainDetailsCache = d.details || {};
+                
                 renderTable('gap-list', d.gappers, [{n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'18%'}, {n:'漲跌%', k:'Change', w:'18%'}, {n:'量比', k:'RVOL', w:'18%'}, {n:'浮動股', k:'FloatStr', w:'15%'}]);
-                renderTable('surge-list', d.surge, [{n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'14%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'戰術標籤', k:'Streak', w:'45%'}, {n:'浮動', k:'FloatStr', w:'15%'}], getActionRowStyle);
+                
+                // 🚨 修復：補回「總量 (Volume)」欄位
+                renderTable('surge-list', d.surge, [{n:'代碼', k:'Code', w:'12%'}, {n:'價格', k:'Price', w:'12%'}, {n:'總量', k:'Volume', w:'14%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'戰術標籤', k:'Streak', w:'35%'}, {n:'浮動', k:'FloatStr', w:'15%'}], getActionRowStyle);
+                
+                // 🚨 修復：補回「突破今日新高 (HOD)」渲染邏輯
+                renderTable('hod-list', d.hod || [], [{n:'時間', k:'Time', w:'15%'}, {n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'15%'}, {n:'訊號', k:'Streak', w:'25%'}, {n:'浮動股', k:'FloatStr', w:'15%'}], getActionRowStyle);
+                
                 if(activeSymbol) loadDetail(activeSymbol);
                 setTimeout(refresh, 3500);
             });
@@ -87,7 +98,7 @@
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
             let news = (d.NewsList || []).map(n => `<div style="margin-bottom:8px;"><span style="color:${n.is_today?'#ffa500':'#8b949e'}; font-weight:bold;">[${n.time}]</span> <a href="${n.link}" target="_blank" style="color:#e6edf3; text-decoration:none; font-size:13px;">${n.title}</a></div>`).join('');
-            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:5px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:10px;"><div>今日最高: <b>${d.HOD}</b></div></div>${news}`;
+            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:5px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:10px;"><div>今日最高: <b>${d.HOD}</b></div><div>量比: <b>${d.RVOL}</b></div><div>浮動股: <b>${d.FloatStr}</b></div></div>${news}`;
         }
 
         function changeZoom(v) { currentZoom += v; document.body.style.transform = `scale(${currentZoom})`; }
