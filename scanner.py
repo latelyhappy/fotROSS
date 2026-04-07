@@ -58,27 +58,13 @@ def fetch_direct_news_bg(ticker, cell):
             pub_ts = item.get('providerPublishTime')
             if not raw_title or not pub_ts or raw_title in cell["raw_news_titles"]: continue
             pub_dt = datetime.fromtimestamp(pub_ts, tz_ny)
-            
-            # 丟棄超過 4 天的新聞
             if (now_ny.date() - pub_dt.date()).days > 4: continue 
-            
             translated_title = translate_to_zh(raw_title)
             cell["raw_news_titles"].append(raw_title)
-            
-            # 🚨 修復新聞時間格式：如果是今天，只顯示時間；否則顯示 月-日 時間。
             is_today_flag = (pub_dt.date() == now_ny.date())
             time_str = pub_dt.strftime("%H:%M") if is_today_flag else pub_dt.strftime("%m-%d %H:%M")
-            
-            new_articles.append({
-                "id": str(random.randint(10000, 99999)), 
-                "title": translated_title, "score": 0, 
-                "link": item.get('link', ''), 
-                "time": time_str, 
-                "is_today": is_today_flag, 
-                "is_read": False, "pub_ts": pub_ts
-            })
+            new_articles.append({"id": str(random.randint(10000, 99999)), "title": translated_title, "score": 0, "link": item.get('link', ''), "time": time_str, "is_today": is_today_flag, "is_read": False, "pub_ts": pub_ts})
             if len(new_articles) >= 5: break
-            
         if new_articles:
             clean_old_list = [n for n in cell.get("NewsList", []) if "🗞️" not in n.get("title", "")]
             cell["NewsList"] = (new_articles + clean_old_list)[:5]
@@ -91,21 +77,43 @@ def get_market_rank_type():
     elif now_ny.time() > dt_time(16, 0): return "1", "盤後"
     else: return "0", "盤中"
 
+# 🚨 修正：繞過 YFinance 封鎖，改抓底層 JSON API，不再隨便寫入假資料
 def fetch_static_bg(ticker):
     try:
+        url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker}?modules=defaultKeyStatistics,summaryDetail,price"
+        res = scraper.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        if res.status_code == 200:
+            data = res.json()['quoteSummary']['result'][0]
+            f = data.get('defaultKeyStatistics', {}).get('floatShares', {}).get('raw', 0)
+            if not f: f = data.get('defaultKeyStatistics', {}).get('sharesOutstanding', {}).get('raw', 0)
+            a = data.get('summaryDetail', {}).get('averageVolume', {}).get('raw', 0)
+            if not a: a = data.get('summaryDetail', {}).get('averageDailyVolume10Day', {}).get('raw', 0)
+            prev = data.get('price', {}).get('regularMarketPreviousClose', {}).get('raw', 1.0)
+            with yf_lock:
+                config.stock_cache[ticker] = (f, a, prev)
+            return
+    except: pass
+    
+    # 備用 YF 擷取
+    try:
+        i = yf.Ticker(ticker).info
+        f = i.get('floatShares', 0) or i.get('sharesOutstanding', 0)
+        a = i.get('averageVolume', 0)
+        prev = i.get('regularMarketPreviousClose', 1.0)
+        with yf_lock: config.stock_cache[ticker] = (f, a, prev)
+    except:
         with yf_lock:
-            i = yf.Ticker(ticker).info
-            f = i.get('floatShares', 0) or i.get('sharesOutstanding', 1000000)
-            a = i.get('averageVolume', 500000)
-            prev = i.get('regularMarketPreviousClose', i.get('previousClose', 1.0))
-        config.stock_cache[ticker] = (f, a, prev or 1.0)
-    except: config.stock_cache[ticker] = (1000000, 500000, 1.0)
+            if ticker not in config.stock_cache:
+                config.stock_cache[ticker] = (0, 0, 1.0) # 標記為 0 代表「獲取失敗」，下次重試
 
 def get_static(ticker):
-    if ticker in config.stock_cache: return config.stock_cache[ticker]
-    config.stock_cache[ticker] = (1000000, 500000, 1.0) 
+    if ticker in config.stock_cache: 
+        if config.stock_cache[ticker][0] == 0: # 如果之前失敗，背景重試
+            static_task_pool.submit(fetch_static_bg, ticker)
+        return config.stock_cache[ticker]
+    config.stock_cache[ticker] = (0, 0, 1.0) 
     static_task_pool.submit(fetch_static_bg, ticker)
-    return (1000000, 500000, 1.0)
+    return (0, 0, 1.0)
 
 def format_vol_km(v):
     if v >= 1e6: return f"{v/1e6:.1f}M"
@@ -135,19 +143,23 @@ def fetch_tv_gainers():
                     f, avg_v, prev_c = get_static(sym)
                     p = float(cols[4] if rank_type == "2" else cols[1])
                     v = float(cols[6] if rank_type == "2" else cols[3])
-                    rvol = v / avg_v if avg_v > 0 else 0
-                    update_or_add_gapper({"Time": datetime.now().strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}", "ChangeAmt": f"{p-prev_c:+.2f}", "Change": f"{(p-prev_c)/prev_c*100:+.2f}%", "Volume": format_vol_km(v), "vol_raw_daily": v, "RVOL": f"{rvol:.1f}x", "FloatStr": f"{f/1e6:.1f}M", "discovery_time": time.time()})
+                    
+                    # 判斷有無數據顯示
+                    rvol_str = f"{v / avg_v:.1f}x" if avg_v > 0 else "計算中"
+                    f_str = (f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K") if f > 0 else "計算中"
+                    
+                    update_or_add_gapper({"Time": datetime.now().strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}", "ChangeAmt": f"{p-prev_c:+.2f}", "Change": f"{(p-prev_c)/prev_c*100:+.2f}%", "Volume": format_vol_km(v), "vol_raw_daily": v, "RVOL": rvol_str, "FloatStr": f_str, "discovery_time": time.time()})
             auto_hot_symbols = auto_hot_symbols[:100]
         except: pass
         time.sleep(5)
 
 # ==========================================
-# ★ V16.7 終極戰情引擎 (加入賣出/停損點)
+# ★ V16.8 數據覺醒引擎 (解決量比消失與重複 Bug)
 # ==========================================
 def scanner_engine():
     global feed_gappers, feed_hod, feed_surge
     tz_ny = pytz.timezone('America/New_York')
-    print("🔥 啟動 V16.7 (包含買賣點與停損防護網)...", flush=True)
+    print("🔥 啟動 V16.8 (修復浮動股假數據 + 獨立日總量累算)...", flush=True)
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     count = 0
@@ -187,65 +199,69 @@ def scanner_engine():
                     pm_df = s_df[s_df.index < s_df.index[0].replace(hour=9, minute=30, second=0)]
                     pmh = float(pm_df['High'].max()) if not pm_df.empty else 0
                     
-                    cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "last_p": p, "last_h": h_1m, "in_pb": False, "s_time": 0, "l_label": "", "s_vol_str": "0K", "s_vol_num": 0, "s_rvol": "0.0x", "s_float": "0M"})
+                    cell = config.MASTER_BRAIN["details"].setdefault(sym, {"HOD": p, "NewsList": [], "last_p": p, "last_h": h_1m, "in_pb": False, "s_time": 0, "l_label": ""})
                     
+                    # 🚨 修正：獨立計算日總量，不再只依賴跳空排行榜
+                    f, a, prev_c = get_static(sym)
+                    
+                    today_mask = s_df.index.date == s_df.index[-1].date()
+                    yf_daily_vol = float(s_df[today_mask]['Volume'].sum())
+                    
+                    tv_daily_vol = 0
                     for g in feed_gappers:
-                        if g['Code'] == sym:
-                            cell["s_vol_num"] = g['vol_raw_daily']
-                            cell["s_vol_str"] = g['Volume']
-                            cell["s_rvol"] = g['RVOL']
-                            cell["s_float"] = g['FloatStr']
-                            break
-                            
-                    cell["s_vol_num"] += v_1m
-                    daily_v_num = cell["s_vol_num"]
-                    daily_v_str = format_vol_km(daily_v_num) if cell["s_vol_str"] == "0K" else cell["s_vol_str"]
-                    rvol_s = cell["s_rvol"]
-                    f_str = cell["s_float"]
-                    try: rvol_n = float(rvol_s.replace('x',''))
-                    except: rvol_n = 0
+                        if g['Code'] == sym: tv_daily_vol = g['vol_raw_daily']; break
+                    
+                    daily_v_num = max(yf_daily_vol, tv_daily_vol)
+                    daily_v_str = format_vol_km(daily_v_num)
+                    
+                    if a > 0:
+                        rvol_n = daily_v_num / a
+                        rvol_s = f"{rvol_n:.1f}x"
+                    else:
+                        rvol_n = 0.0
+                        rvol_s = "計算中"
+                        
+                    if f > 0:
+                        f_num = f
+                        f_str = f"{f/1e6:.1f}M" if f >= 1e6 else f"{f/1e3:.0f}K"
+                    else:
+                        f_num = 0
+                        f_str = "計算中"
 
                     label_list = []
                     trigger = False
                     
-                    # (A) 買入訊號：瞬間資金爆發
                     if len(s_df) >= 4:
                         avg_v_prev = s_df['Volume'].iloc[-4:-1].mean()
                         if v_1m > avg_v_prev * 3 and v_1m > 10000: 
                             label_list.append("⚡資金爆發")
                             trigger = True
                     
-                    # (B) 買入區間：EMA 買區
                     if p > curr_vwap and e9 > e9_prev and e20 > e20_prev:
                         if e20 < p < (e9 + 0.15) and daily_v_num > 100000:
                             label_list.append("🚀EMA買區")
                             trigger = True
                             cell["in_pb"] = True
                             
-                        # (C) 確定買點：第一根 K 線新高
                         if cell.get("in_pb") and h_1m > s_df['High'].iloc[-2] and p > e20:
                             label_list.append("🎯關鍵轉折")
                             trigger = True
                             cell["in_pb"] = False
                     
-                    # (D) 追高買點：HOD 突破
                     if p > cell["HOD"]: 
                         cell["HOD"] = p
                         label_list.insert(0, "⚠️爆量突破" if v_1m > 10000 else "⭐破高")
                         trigger = True
 
-                    # 🚨 賣出點與防護網 🚨
-                    # (E) 賣出點 (獲利)：PMH 壓力偵測
                     if pmh > 0 and 0 < (pmh - p) < p * 0.005: 
                         label_list.append("⛔PMH壓")
                         trigger = True
                         
-                    # (F) 賣出點 (停損)：剛剛跌破 EMA 20 生命線
                     prev_close = float(s_df['Close'].iloc[-2]) if len(s_df) > 1 else p
                     if p < e20 and prev_close >= e20_prev:
                         label_list.append("🚨跌破20均")
                         trigger = True
-                        cell["in_pb"] = False # 重置買入區間
+                        cell["in_pb"] = False
 
                     label = " + ".join(label_list)
 
@@ -262,7 +278,7 @@ def scanner_engine():
 
                     item = {
                         "Time": now_ny.strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}",
-                        "Change": f"{(p-get_static(sym)[2])/get_static(sym)[2]*100:+.2f}%",
+                        "Change": f"{(p-prev_c)/prev_c*100:+.2f}%" if prev_c>0 else "0%",
                         "Volume": daily_v_str, "vol_raw": daily_v_num, "RVOL": rvol_s, "RvolNum": rvol_n,
                         "FloatStr": f_str, "Streak": label,
                         "HasFreshNews": has_news, "HasCatalyst": has_catalyst, "NewsScore": len(cell["NewsList"])*10
