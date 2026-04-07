@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>ROSS Sniper V18.8 - 資訊擴充版</title>
+    <title>ROSS Sniper V18.9 - 終極打磨版</title>
     <style>
         body { margin: 0; background: #050811; color: #c9d1d9; font-family: sans-serif; overflow: hidden; transform-origin: top left; }
         .window { position: absolute; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.8); z-index: 1; }
@@ -19,6 +19,12 @@
         #zoom-controls { position: fixed; top: 10px; right: 10px; z-index: 9999; display: flex; gap: 5px; }
         #zoom-controls button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 11px; }
         #sys-status { position: fixed; bottom: 10px; left: 10px; background: rgba(13,17,23,0.8); border: 1px solid #30363d; padding: 5px 10px; border-radius: 4px; font-size: 11px; z-index: 9999; }
+        
+        /* 戰情分析專屬樣式 */
+        .detail-header { text-align: center; margin: 10px 0; }
+        .detail-sym { color: #58a6ff; font-size: 20px; font-weight: bold; margin-right: 10px; }
+        .detail-price { font-size: 16px; font-weight: bold; }
+        .detail-stats { display: flex; justify-content: space-around; margin-bottom: 15px; font-size: 12px; background: #161b22; padding: 10px; border-radius: 4px; border: 1px solid #30363d; }
     </style>
 </head>
 <body>
@@ -32,7 +38,7 @@
     
     <div class="window" id="win-news" style="top:300px; left:10px; width:450px; height:280px;"><div class="title-bar">3. 新聞催化榜 (今日熱度)</div><div class="content" id="news-list"></div><div class="resize-handle"></div></div>
     
-    <div class="window" id="win-surge" style="top:10px; left:470px; width:520px; height:450px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.8 Sniper Pro)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
+    <div class="window" id="win-surge" style="top:10px; left:470px; width:520px; height:450px; border: 1px solid #6e40c9;"><div class="title-bar">4. 短線動能追蹤 (V18.9 Sniper Pro)</div><div class="content" id="surge-list"></div><div class="resize-handle"></div></div>
     
     <div class="window" id="win-hod" style="top:470px; left:470px; width:520px; height:300px;"><div class="title-bar">2. 突破今日新高</div><div class="content" id="hod-list"></div><div class="resize-handle"></div></div>
     
@@ -62,7 +68,6 @@
                 html += `<tr ${styleFunc ? styleFunc(row) : ''} onclick="loadDetail('${row.Code}')">`;
                 cols.forEach(c => {
                     let val = row[c.k] || '';
-                    // 🚨 補回：有催化劑新聞時，代碼旁邊加上 📰 圖示
                     if (c.k === 'Code') {
                         val = `<span class="sym" ondblclick="window.open('https://www.tradingview.com/chart/?symbol=${row.Code}')">${row.Code}</span>${row.HasCatalyst ? ' 📰' : ''}`;
                     }
@@ -84,13 +89,13 @@
 
         function refresh() {
             fetch('/data?t=' + Date.now()).then(r => r.json()).then(d => {
-                document.getElementById('sys-status').innerText = `🟢 V18.8 已連線 | 更新: ${d.last_update}`;
+                document.getElementById('sys-status').innerText = `🟢 V18.9 已連線 | 更新: ${d.last_update}`;
                 brainDetailsCache = d.details || {};
                 
                 renderTable('gap-list', d.gappers, [{n:'代碼', k:'Code', w:'15%'}, {n:'價格', k:'Price', w:'20%'}, {n:'漲跌%', k:'Change', w:'20%'}, {n:'量比', k:'RVOL', w:'20%'}, {n:'浮動股', k:'FloatStr', w:'15%'}]);
                 
-                // 🚨 渲染新聞排行榜
-                renderTable('news-list', d.news_rank || [], [{n:'代碼', k:'Code', w:'20%'}, {n:'價格', k:'Price', w:'20%'}, {n:'量比', k:'RVOL', w:'20%'}, {n:'浮動股', k:'FloatStr', w:'20%'}], getActionRowStyle);
+                // 新聞排行榜增加總量與量比
+                renderTable('news-list', d.news_rank || [], [{n:'代碼', k:'Code', w:'18%'}, {n:'價格', k:'Price', w:'15%'}, {n:'總量', k:'Volume', w:'18%'}, {n:'量比', k:'RVOL', w:'15%'}, {n:'浮動股', k:'FloatStr', w:'15%'}], getActionRowStyle);
                 
                 renderTable('surge-list', d.surge, [{n:'代碼', k:'Code', w:'14%'}, {n:'價格', k:'Price', w:'12%'}, {n:'總量', k:'Volume', w:'14%'}, {n:'量比', k:'RVOL', w:'12%'}, {n:'戰術標籤', k:'Streak', w:'35%'}, {n:'浮動', k:'FloatStr', w:'13%'}], getActionRowStyle);
                 
@@ -103,8 +108,26 @@
 
         function loadDetail(sym) {
             activeSymbol = sym; const d = brainDetailsCache[sym]; if(!d) return;
-            let news = (d.NewsList || []).map(n => `<div style="margin-bottom:12px; line-height:1.4;"><span style="color:${n.is_today?'#ffa500':'#8b949e'}; font-weight:bold;">[${n.time}]</span> <a href="${n.link}" target="_blank" style="color:#e6edf3; text-decoration:none; font-size:13.5px;">${n.title}</a></div>`).join('');
-            document.getElementById('detail-list').innerHTML = `<h2 style="text-align:center; color:#58a6ff; margin:10px 0;">${sym}</h2><div style="display:flex; justify-content:space-around; margin-bottom:15px; font-size:12px;"><div>今日最高: <b>${d.HOD}</b></div><div>量比: <b>${d.RVOL}</b></div><div>浮動股: <b>${d.FloatStr}</b></div></div><hr style="border-color:#30363d;">${news}`;
+            
+            // 🚨 加上「美東」字樣
+            let news = (d.NewsList || []).map(n => `<div style="margin-bottom:12px; line-height:1.4;"><span style="color:${n.is_today?'#ffa500':'#8b949e'}; font-weight:bold; font-size:11.5px; margin-right:4px;">[${n.time} 美東]</span> <a href="${n.link}" target="_blank" style="color:#e6edf3; text-decoration:none; font-size:13.5px;">${n.title}</a></div>`).join('');
+            
+            // 🚨 移除 HOD，改用 價格+漲跌幅，並補上 總量
+            let priceColor = (d.Change && d.Change.includes('+')) ? '#3fb950' : '#f85149';
+            
+            document.getElementById('detail-list').innerHTML = `
+                <div class="detail-header">
+                    <span class="detail-sym">${sym}</span> 
+                    <span class="detail-price" style="color:${priceColor};">${d.Price || ''} (${d.Change || '0.00%'})</span>
+                </div>
+                <div class="detail-stats">
+                    <div>總量: <b>${d.Volume || '計算中'}</b></div>
+                    <div>量比: <b>${d.RVOL || '計算中'}</b></div>
+                    <div>浮動股: <b>${d.FloatStr || '計算中'}</b></div>
+                </div>
+                <hr style="border-color:#30363d; margin-bottom: 15px;">
+                ${news}
+            `;
         }
 
         function changeZoom(v) { currentZoom += v; document.body.style.transform = `scale(${currentZoom})`; }
