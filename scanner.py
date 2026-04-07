@@ -4,6 +4,8 @@ import pytz
 import yfinance as yf
 import pandas as pd
 import requests
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor
 
 import config
@@ -15,7 +17,7 @@ yf_lock = threading.Lock()
 auto_hot_symbols = []
 feed_gappers = []
 feed_surge = []
-feed_hod = [] # 🚨 修復：加回 HOD 陣列
+feed_hod = []
 
 CATALYST_KEYWORDS = ['FDA', 'MERGER', 'ACQUISITION', 'BUYOUT', 'EARNINGS', 'PATENT', 'PHASE', 'AGREEMENT', 'CONTRACT', 'PARTNERSHIP', 'TRIAL', 'CLEARANCE', 'APPROVAL', 'REVENUE', 'GUIDANCE', '收購', '財報', '臨床']
 
@@ -28,31 +30,35 @@ def translate_to_zh(text):
     except: pass
     return text
 
-# 🚨 修復：改用 yfinance 官方引擎抓新聞，破解 Yahoo 封鎖
+# 🚨 修復二：改用 RSS 訂閱源抓新聞，完全免疫 Yahoo 封鎖
 def fetch_direct_news_bg(ticker, cell):
     try:
         tz_ny = pytz.timezone('America/New_York')
         now_ny = datetime.now(tz_ny)
-        
-        tk = yf.Ticker(ticker)
-        news_items = tk.news # 使用官方介面繞過防爬蟲
-        
-        if not news_items: return
-        articles = []
-        for item in news_items:
-            raw_t = item.get('title', '').strip()
-            ts = item.get('providerPublishTime')
-            if not raw_t or not ts: continue
-            dt = datetime.fromtimestamp(ts, tz_ny)
-            if (now_ny.date() - dt.date()).days > 4: continue
-            is_today = (dt.date() == now_ny.date())
-            t_str = dt.strftime("%H:%M") if is_today else dt.strftime("%m-%d %H:%M")
-            articles.append({"id": str(random.randint(1,9999)), "title": translate_to_zh(raw_t), "link": item.get('link', ''), "time": t_str, "is_today": is_today, "pub_ts": ts})
-        
-        if articles: cell["NewsList"] = articles[:5]
+        url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        if res.status_code == 200:
+            root = ET.fromstring(res.text)
+            articles = []
+            for item in root.findall('./channel/item')[:5]:
+                raw_t = item.find('title').text
+                link = item.find('link').text
+                pubDate = item.find('pubDate').text
+                
+                dt = parsedate_to_datetime(pubDate).astimezone(tz_ny)
+                if (now_ny.date() - dt.date()).days > 4: continue
+                is_today = (dt.date() == now_ny.date())
+                t_str = dt.strftime("%H:%M") if is_today else dt.strftime("%m-%d %H:%M")
+                
+                articles.append({
+                    "id": str(random.randint(1,9999)), 
+                    "title": translate_to_zh(raw_t), 
+                    "link": link, "time": t_str, 
+                    "is_today": is_today, "pub_ts": dt.timestamp()
+                })
+            if articles: cell["NewsList"] = articles
     except: pass
 
-# 🚨 修復：改用 yfinance 官方引擎抓浮動股，破解 Yahoo 封鎖
 def fetch_static_bg(ticker):
     try:
         tk = yf.Ticker(ticker)
@@ -104,7 +110,7 @@ def fetch_tv_gainers():
 def scanner_engine():
     global feed_surge, feed_hod
     tz_ny = pytz.timezone('America/New_York')
-    print("💎 V18.6 滿血復活版已啟動 (修復 HOD 視窗與官方 API 連線)...", flush=True)
+    print("💎 V18.7 已啟動 (修復 5萬美金過濾 Bug 與 RSS 新聞源)...", flush=True)
     threading.Thread(target=fetch_tv_gainers, daemon=True).start()
     
     count = 0
@@ -112,13 +118,19 @@ def scanner_engine():
         try:
             symbols = list(set(auto_hot_symbols[:80]))
             if not symbols: time.sleep(2); continue
-            df = yf.download(symbols, period='1d', interval='1m', prepost=True, progress=False, timeout=15)
             
-            t_all = []
+            # 🚨 修復一：加入 group_by 確保陣列結構正確，防止解析崩潰
+            df = yf.download(symbols, period='1d', interval='1m', prepost=True, progress=False, timeout=15, group_by='ticker')
+            
             now_ts = time.time()
             for sym in symbols:
                 try:
-                    s_df = df[sym].dropna() if isinstance(df.columns, pd.MultiIndex) else df.dropna()
+                    # 確保正確取出單一股票的 DataFrame
+                    if len(symbols) == 1: s_df = df.dropna()
+                    else:
+                        try: s_df = df[sym].dropna()
+                        except: continue
+                        
                     if len(s_df) < 15: continue
                     p = float(s_df['Close'].iloc[-1])
                     v_1m = float(s_df['Volume'].iloc[-1])
@@ -149,54 +161,54 @@ def scanner_engine():
                     
                     label_list = []
                     trigger = False
-                    is_hod = False # 🚨 標記是否為破高
+                    is_hod = False
                     
                     dollar_vol = p * v_1m
-                    if dollar_vol >= 50000:
-                        avg_v_5m = s_df['Volume'].iloc[-6:-1].mean()
-                        if v_1m > avg_v_5m * 3: 
-                            label_list.append("🔥強力點火" if dollar_vol > 200000 else "🔥火星塞點火")
-                            trigger = True
+                    avg_v_5m = s_df['Volume'].iloc[-6:-1].mean()
+                    
+                    # 🚨 修復一：將 5 萬美金門檻「僅」套用於火星塞點火！
+                    if v_1m > avg_v_5m * 3 and dollar_vol >= 50000: 
+                        label_list.append("🔥強力點火" if dollar_vol > 200000 else "🔥火星塞點火")
+                        trigger = True
+                    
+                    # 以下邏輯不受單分鐘 5 萬美金限制，保證短線表正常運作
+                    if p > curr_vwap and e9 > e20:
+                        if (abs(e9 - e20) / e20) < 0.005: cell["comp_count"] += 1
+                        else: cell["comp_count"] = 0
                         
-                        if p > curr_vwap and e9 > e20:
-                            if (abs(e9 - e20) / e20) < 0.005: cell["comp_count"] += 1
-                            else: cell["comp_count"] = 0
-                            
-                            if e20 < p < (e9 + 0.1): label_list.append("🚀EMA買區"); trigger = True; cell["in_pb"] = True
-                            
-                            if cell["in_pb"] and h_1m > s_df['High'].iloc[-2]:
-                                label_list.append("🎯關鍵轉折"); trigger = True; cell["in_pb"] = False
+                        if e20 < p < (e9 + 0.1): label_list.append("🚀EMA買區"); trigger = True; cell["in_pb"] = True
                         
-                        dist = p - e9
-                        if dist > 2.5 * atr: label_list.append("🔴超買禁逃"); trigger = True
-                        elif dist > 1.5 * atr: label_list.append("🟡乖離警戒"); trigger = True
-                        
-                        if pmh > 0 and 0 < (pmh - p) < p * 0.005: label_list.append("⛔PMH壓"); trigger = True
-                        
-                        # 🚨 修復：HOD 邏輯與 HOD 視窗發送
-                        if p > cell["HOD"]: 
-                            cell["HOD"] = p
-                            label_list.append("⭐破高")
-                            trigger = True
-                            is_hod = True 
-                        
-                        if p < e20 and s_df['Close'].iloc[-2] >= e20_ser.iloc[-2]: label_list.append("🚨趨勢終結"); trigger = True
-                        
-                        if trigger:
-                            if cell["l_label"] != " ".join(label_list):
-                                cell["s_time"], cell["l_label"], cell["peak"] = now_ts, " ".join(label_list), h_1m
-                            cell["peak"] = max(cell["peak"], h_1m)
-                            if (now_ts - cell["s_time"]) > 180 and h_1m <= cell["peak"]:
-                                label_list.append("⏱️動能停滯")
+                        if cell["in_pb"] and h_1m > s_df['High'].iloc[-2]:
+                            label_list.append("🎯關鍵轉折"); trigger = True; cell["in_pb"] = False
+                    
+                    dist = p - e9
+                    if dist > 2.5 * atr: label_list.append("🔴超買禁逃"); trigger = True
+                    elif dist > 1.5 * atr: label_list.append("🟡乖離警戒"); trigger = True
+                    
+                    if pmh > 0 and 0 < (pmh - p) < p * 0.005: label_list.append("⛔PMH壓"); trigger = True
+                    
+                    if p > cell["HOD"]: 
+                        cell["HOD"] = p
+                        label_list.append("⭐破高")
+                        trigger = True
+                        is_hod = True 
+                    
+                    if p < e20 and s_df['Close'].iloc[-2] >= e20_ser.iloc[-2]: label_list.append("🚨趨勢終結"); trigger = True
+                    
+                    if trigger:
+                        if cell["l_label"] != " ".join(label_list):
+                            cell["s_time"], cell["l_label"], cell["peak"] = now_ts, " ".join(label_list), h_1m
+                        cell["peak"] = max(cell["peak"], h_1m)
+                        if (now_ts - cell["s_time"]) > 180 and h_1m <= cell["peak"]:
+                            label_list.append("⏱️動能停滯")
 
                     if trigger:
                         item = {"Time": datetime.now(tz_ny).strftime('%H:%M:%S'), "Code": sym, "Price": f"${p:.2f}", "Change": f"{(p-prev_c)/prev_c*100:+.2f}%" if prev_c>0 else "0.00%", "Volume": format_vol_km(daily_v), "RVOL": f"{daily_v/a:.1f}x" if a > 1 else "計算中", "FloatStr": f"{f/1e6:.1f}M" if f > 1 else "計算中", "FloatNum": f, "Streak": " + ".join(label_list), "HasFreshNews": any(n.get("pub_ts",0) > (now_ts-600) for n in cell["NewsList"])}
                         feed_surge.insert(0, item)
-                        # 🚨 修復：如果破高，同時發送到 HOD 視窗
                         if is_hod: feed_hod.insert(0, item) 
                     
                     if count % 25 == 0: news_task_pool.submit(fetch_direct_news_bg, sym, cell)
-                except: pass
+                except Exception as e: pass
             
             feed_surge = feed_surge[:100]
             feed_hod = feed_hod[:50]
